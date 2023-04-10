@@ -131,7 +131,7 @@ class ActorCriticAgent:
             returns = torch.FloatTensor([torch.sum(torch.FloatTensor([self.gamma**i for i in range(rewards[j:].size(0))]).to(self.device)\
                 * rewards[j:]) for j in range(rewards.size(0))]).view(-1, 1).to(self.device)
             
-            state_actions = torch.FloatTensor(torch.cat((states_agent, F.one_hot(actions, self.env_action_dim).squeeze(1)), dim=1)).to(self.device)
+            state_actions = (torch.cat((states_agent, F.one_hot(actions, self.env_action_dim).squeeze(1)), dim=1)).float().to(self.device)
 
             agent_states.append(states_agent)
             agent_states_combined.append(states_combined)
