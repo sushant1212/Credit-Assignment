@@ -128,7 +128,7 @@ class ActorCriticAgent:
             dones = torch.FloatTensor(np.array([sars[6] for sars in self.trajectory[agent_index]])).view(-1, 1).to(self.device)
 
             # compute returns
-            returns = torch.FloatTensor([torch.sum(torch.FloatTensor([self.gamma**i for i in range(rewards[j:].size(0))])\
+            returns = torch.FloatTensor([torch.sum(torch.FloatTensor([self.gamma**i for i in range(rewards[j:].size(0))]).to(self.device)\
                 * rewards[j:]) for j in range(rewards.size(0))]).view(-1, 1).to(self.device)
             
             state_actions = torch.FloatTensor(torch.cat((states_agent, F.one_hot(actions, self.env_action_dim).squeeze(1)), dim=1)).to(self.device)
