@@ -178,8 +178,10 @@ class ActorCriticAgent:
         loss.backward()
 
         # gradient clipping
-        self.total_grad_norm += torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=0.5)
-        self.total_grad_norm += torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=0.5)
+        total_grad_norm = 0.0
+        total_grad_norm += torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=0.5)
+        total_grad_norm += torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=0.5)
+        self.total_grad_norm = total_grad_norm.item()
 
         # updating parameters
         self.actor_optimizer.step()
