@@ -11,6 +11,7 @@ from agents.utils import MetricMonitor
 import os
 from comet_ml import Experiment
 from tqdm import tqdm
+import sys
 
 class Actor(nn.Module):
     def __init__(self, obs_dim:int, hidden_layers:List[int], last_layer_dim:int) -> None:
@@ -46,9 +47,12 @@ class ActorCriticAgent:
             critic_lr,
             run_name,
             gamma=0.99,
+            entropy_penalty=1e-3,
             max_cycles:int=100,
         ) -> None:
         self.n_agents = n_agents
+        self.max_cycles = max_cycles
+
         assert(self.n_agents >= 1), "Number of agents should be greater than 0"
         self.env = simple_spread_custom.env(max_cycles=max_cycles, N=self.n_agents)
         
@@ -66,22 +70,9 @@ class ActorCriticAgent:
         self.actor_lr = actor_lr
         self.critic_lr = critic_lr
         self.gamma = gamma
+        self.entropy_penalty = entropy_penalty
         self.run_name = run_name
         
-        self.experiment = Experiment(
-            api_key="8U8V63x4zSaEk4vDrtwppe8Vg",
-            project_name="credit-assignment",
-            parse_args=False
-        )
-        self.experiment.set_name(self.run_name)
-        # logging hparams to comet_ml
-        hyperparams = {
-            "actor_lr": self.actor_lr,
-            "critic_lr" : self.critic_lr,
-            "gamma" : self.gamma,
-        }
-        self.experiment.log_parameters(hyperparams)
-
     def get_action(self, state):
         with torch.no_grad():
             state = torch.FloatTensor(state).to(self.device)
@@ -89,6 +80,12 @@ class ActorCriticAgent:
             dist = F.softmax(logits, dim=0)
             probs = Categorical(dist)
             return probs.sample().cpu().detach().item()
+
+    def get_deterministic_action(self, state):
+        with torch.no_grad():
+            state = torch.FloatTensor(state).to(self.device)
+            logits = self.actor(state)
+            return torch.argmax(logits, dim=0).cpu().detach().item()
 
     def combine_observations(self, agent_obs:np.ndarray, global_obs:np.ndarray):
         """Combines the observation of current agent with the global state.
@@ -143,6 +140,7 @@ class ActorCriticAgent:
         
         actor_loss = 0
         critic_loss = 0
+        entropy_loss = 0
         for agent_index in range(self.n_agents):
             logits = self.actor(agent_states_combined[agent_index])
             critic_input = agent_states[agent_index]
@@ -156,7 +154,11 @@ class ActorCriticAgent:
             dists = F.softmax(logits, dim=1)
             probs = Categorical(dists)
 
+            # computing critic loss
             critic_loss += F.mse_loss(Q_s_a, agent_returns[agent_index])
+
+            # computing entropy bonus
+            entropy = -torch.mean(torch.sum(dists * torch.log(torch.clamp(dists, 1e-10,1.0)), dim=1))
             
             # calculating value function
             V_s = torch.sum((Q_s_a * dists), dim=1, keepdim=True)
@@ -166,11 +168,13 @@ class ActorCriticAgent:
             
             policy_loss = -probs.log_prob(agent_actions[agent_index].view(agent_actions[agent_index].size(0))).view(-1, 1) * advantage.detach()
             actor_loss += policy_loss.mean()
+            entropy_loss += entropy
 
         # total loss
-        loss = actor_loss + critic_loss
+        loss = actor_loss + critic_loss - self.entropy_penalty * entropy_loss
         self.actor_loss += actor_loss.item()
         self.critic_loss += critic_loss.item()
+        self.entropy_loss += -(self.entropy_penalty * entropy_loss).item()
 
         # backpropagation
         self.actor_optimizer.zero_grad()
@@ -193,7 +197,8 @@ class ActorCriticAgent:
         
         self.train_metric_monitor.update("actor_loss", self.actor_loss, os.path.join(model_save_path, "plots"))
         self.train_metric_monitor.update("critic_loss", self.critic_loss, os.path.join(model_save_path, "plots"))
-        self.train_metric_monitor.update("total_loss", self.actor_loss + self.critic_loss, os.path.join(model_save_path, "plots"))
+        self.train_metric_monitor.update("entropy_loss", self.entropy_loss, os.path.join(model_save_path, "plots"))
+        self.train_metric_monitor.update("total_loss", self.actor_loss + self.critic_loss + self.entropy_loss, os.path.join(model_save_path, "plots"))
         self.train_metric_monitor.update("total_grad_norm", self.total_grad_norm, os.path.join(model_save_path, "plots"))
 
         self.agent_metric_monitor.update("episode_reward", self.episode_reward, os.path.join(model_save_path, "plots"))
@@ -204,7 +209,8 @@ class ActorCriticAgent:
         metrics = {
             "actor_loss": self.actor_loss,
             "critic_loss": self.critic_loss,
-            "total_loss": self.actor_loss + self.critic_loss,
+            "entropy_loss": self.entropy_loss,
+            "total_loss": self.actor_loss + self.critic_loss + self.entropy_loss,
             "total_grad_norm": self.total_grad_norm,
             "episode_reward": self.episode_reward,
         }
@@ -223,9 +229,26 @@ class ActorCriticAgent:
         torch.save(self.critic.state_dict(), critic_save_path)
 
     def train(self, n_episodes:int, model_save_path:str):
+        # setting up Comet
+        self.experiment = Experiment(
+            api_key="8U8V63x4zSaEk4vDrtwppe8Vg",
+            project_name="credit-assignment",
+            parse_args=False
+        )
+        self.experiment.set_name(self.run_name)
+        # logging hparams to comet_ml
+        hyperparams = {
+            "actor_lr": self.actor_lr,
+            "critic_lr" : self.critic_lr,
+            "gamma" : self.gamma,
+        }
+        self.experiment.log_parameters(hyperparams)
+
+        # optimizers for actor and critic
         self.actor_optimizer = optim.Adam(self.actor.parameters(), self.actor_lr)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), self.critic_lr)
 
+        # metric monitors to store metric values
         self.train_metric_monitor = MetricMonitor()
         self.agent_metric_monitor = MetricMonitor()
         
@@ -243,6 +266,7 @@ class ActorCriticAgent:
             self.agent_rewards = [0.0 for _ in range(self.n_agents)]
             self.actor_loss = 0.0
             self.critic_loss = 0.0
+            self.entropy_loss = 0.0
             self.total_grad_norm = 0.0
 
             for agent in self.env.agent_iter():
@@ -292,3 +316,49 @@ class ActorCriticAgent:
             stream.set_description(
                 f"Episode {episode+1}:  {self.agent_metric_monitor}"
             )
+
+    def eval(self, actor_path, n_episodes, render=False):
+        try:
+            self.actor.load_state_dict(torch.load(actor_path, map_location=torch.device(self.device)))
+            self.actor.eval()
+        except Exception as e:
+            print(e)
+            sys.exit(0)
+
+        print("Successfully loaded model")
+
+        if render:
+            self.env = simple_spread_custom.env(max_cycles=self.max_cycles, N=self.n_agents, render_mode="human")
+        
+        for i in range(n_episodes):
+            self.env.reset()
+
+            # index to keep track of the current agent
+            self.curr_agent_index = 0
+
+            for agent in self.env.agent_iter():
+                # this reward is R_t and not R_t+1. Also terminated and truncated are current states
+                obs, rew, terminated, truncated, info = self.env.last()
+
+                # global state of the env is the concatenation of individual states of agents
+                global_state = self.env.state()
+
+                # making feature vector for current agent that encodes other agent states as well
+                agent_obs = self.combine_observations(obs, global_state)
+
+                # sampling action using current policy
+                action = self.get_deterministic_action(agent_obs)
+                if action != 0:
+                    print(f"Agent {self.curr_agent_index} : {action}")
+
+                # the agent has already terminated or truncated
+                if terminated or truncated:
+                    self.env.step(None)
+                
+                else:
+                    self.env.step(action)
+                
+                done = terminated or truncated
+
+                self.curr_agent_index += 1
+                self.curr_agent_index %= self.n_agents
