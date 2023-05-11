@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from agents.actor_critic import ActorCriticAgent
+from agents.actor_critic_v import ActorCriticAgent
 
 
 

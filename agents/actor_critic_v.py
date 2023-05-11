@@ -230,19 +230,19 @@ class ActorCriticAgent:
 
     def train(self, n_episodes:int, model_save_path:str):
         # setting up Comet
-        # self.experiment = Experiment(
-        #     api_key="8U8V63x4zSaEk4vDrtwppe8Vg",
-        #     project_name="credit-assignment",
-        #     parse_args=False
-        # )
-        # self.experiment.set_name(self.run_name)
-        # # logging hparams to comet_ml
-        # hyperparams = {
-        #     "actor_lr": self.actor_lr,
-        #     "critic_lr" : self.critic_lr,
-        #     "gamma" : self.gamma,
-        # }
-        # self.experiment.log_parameters(hyperparams)
+        self.experiment = Experiment(
+            api_key="8U8V63x4zSaEk4vDrtwppe8Vg",
+            project_name="credit-assignment",
+            parse_args=False
+        )
+        self.experiment.set_name(self.run_name)
+        # logging hparams to comet_ml
+        hyperparams = {
+            "actor_lr": self.actor_lr,
+            "critic_lr" : self.critic_lr,
+            "gamma" : self.gamma,
+        }
+        self.experiment.log_parameters(hyperparams)
 
         # optimizers for actor and critic
         self.actor_optimizer = optim.Adam(self.actor.parameters(), self.actor_lr)
@@ -309,9 +309,9 @@ class ActorCriticAgent:
             # update networks
             self.update()
             # update plots
-            # self.plot(model_save_path, episode+1)
+            self.plot(model_save_path, episode+1)
             # save model
-            # if(episode % 500 == 0): self.save(model_save_path, episode)
+            if(episode % 500 == 0): self.save(model_save_path, episode)
 
             stream.set_description(
                 f"Episode {episode+1}:  {self.agent_metric_monitor}"
