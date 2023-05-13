@@ -43,9 +43,9 @@ class ActorCriticAgent:
             n_agents:int, 
             actor_hidden_layers:List[int],
             critic_hidden_layers:List[int],
+            run_name,
             actor_lr, 
             critic_lr,
-            run_name,
             gamma=0.99,
             entropy_penalty=1e-3,
             max_cycles:int=100,
@@ -87,7 +87,7 @@ class ActorCriticAgent:
             logits = self.actor(state)
             return torch.argmax(logits, dim=0).cpu().detach().item()
 
-    def combine_observations(self, agent_obs:np.ndarray, global_obs:np.ndarray):
+    def combine_observations(self, agent_obs:np.ndarray, global_obs:np.ndarray, curr_agent_index=None):
         """Combines the observation of current agent with the global state.
         It computes [obs_agent +  [(agent.rel_px, agent.rel_py, agent.rel_vx, agent.rel_vy) for all agents]]
 
@@ -95,9 +95,14 @@ class ActorCriticAgent:
             agent_obs (np.ndarray): observation received for the current agent
             global_obs (np.ndarray): observation of the global state
         """
+        if curr_agent_index is None:
+            index = self.curr_agent_index
+        else:
+            index = curr_agent_index
+        
         global_states = []
         for i in range(self.n_agents):
-            if i == self.curr_agent_index:
+            if i == index:
                 continue
             other_agent_obs = global_obs[self.env_obs_dim*i: self.env_obs_dim*(i+1)]
             global_states.append(np.array([
@@ -348,8 +353,6 @@ class ActorCriticAgent:
 
                 # sampling action using current policy
                 action = self.get_deterministic_action(agent_obs)
-                if action != 0:
-                    print(f"Agent {self.curr_agent_index} : {action}")
 
                 # the agent has already terminated or truncated
                 if terminated or truncated:
