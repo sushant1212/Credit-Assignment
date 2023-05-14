@@ -155,14 +155,15 @@ class Trainer:
 if __name__ == "__main__":
     ap = ArgumentParser()
     ap.add_argument("-n", "--num_epochs", required=True, type=int)
+    ap.add_argument("-d", "--data_dir", required=True, type=str)
     ap.add_argument("-r", "--run_name", required=True, default=1e-3)
     ap.add_argument("-b", "--batch_size", required=False, default=32)
     ap.add_argument("-l", "--lr", required=False, default=1e-3)
     ap.add_argument("-t", "--network_type", required=False, default="mlp")
     args = vars(ap.parse_args())
-
-    train_json_list = [file.split("/")[-1] for file in glob("jsons/*.json")]
-    train_dataset = RewardDataset(train_json_list, "jsons")
+    data_dir = args["data_dir"]
+    train_json_list = [file.split("/")[-1] for file in glob(f"{data_dir}/*.json")]
+    train_dataset = RewardDataset(train_json_list, data_dir)
 
     params = {
         "batch_size": args["batch_size"],
