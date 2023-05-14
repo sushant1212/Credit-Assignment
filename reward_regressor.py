@@ -157,7 +157,7 @@ if __name__ == "__main__":
     ap.add_argument("-n", "--num_epochs", required=True, type=int)
     ap.add_argument("-d", "--data_dir", required=True, type=str)
     ap.add_argument("-r", "--run_name", required=True, default=1e-3)
-    ap.add_argument("-b", "--batch_size", required=False, default=32)
+    ap.add_argument("-b", "--batch_size", required=False, default=32, type=int)
     ap.add_argument("-l", "--lr", required=False, default=1e-3)
     ap.add_argument("-t", "--network_type", required=False, default="mlp")
     args = vars(ap.parse_args())
