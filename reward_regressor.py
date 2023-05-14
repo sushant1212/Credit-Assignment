@@ -66,7 +66,7 @@ class MLP_RewardPredictor(nn.Module):
 
 class Trainer:
     def __init__(self, model, train_dataset:RewardDataset, params, run_name, plot_dir) -> None:
-        self.model = model
+        self.model = model.to(params["device"])
         self.train_dataset = train_dataset
         self.params = params
         self.run_name = run_name
