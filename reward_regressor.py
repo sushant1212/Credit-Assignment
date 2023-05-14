@@ -11,7 +11,6 @@ from glob import glob
 from math import sqrt
 from comet_ml import Experiment
 import torch.optim as optim
-import matplotlib.pyplot as plt
 from tqdm import tqdm
 from argparse import ArgumentParser
 
@@ -71,8 +70,9 @@ class Trainer:
         self.train_dataset = train_dataset
         self.params = params
         self.run_name = run_name
-        self.metric_monitor = MetricMonitor()
+        self.metric_monitor = None
         self.plot_dir = plot_dir
+        self.total_steps = 0
         
         if not os.path.exists(self.plot_dir):
             os.makedirs(plot_dir)
@@ -91,23 +91,25 @@ class Trainer:
         state_actions, global_rewards, agent_rewards = list(zip(*batch))
         return torch.cat(state_actions, dim=0), torch.cat(global_rewards, dim=0), torch.cat(agent_rewards, dim=0)
     
-    def plot(self, epoch, fig=None):
-        if fig is not None:
-            self.experiment.log_figure(figure=fig)
+    def plot(self, epoch=None, step=None, **kwargs):
+        if epoch is not None:
+            self.experiment.log_metrics(kwargs, epoch=epoch)
+        
+        elif step is not None:
+            self.experiment.log_metrics(kwargs, step=step)
+        
+        else:
+            raise NotImplementedError
 
-        for metric in self.metric_monitor.metrics.keys():
-            self.experiment.log_metric(name=metric, value=self.metric_monitor.metrics[metric]["avg"], epoch=epoch)
 
     def train_one_epoch(self, train_loader, model, criterion, optimizer, epoch, params):
         model.train(True)
         self.epoch_loss = 0.0
         self.weight_values = None
-
-        fig, ax = plt.subplots(1, 1)
-        y_hats = []
-        ys = []
+        self.metric_monitor = MetricMonitor()
+        stream = tqdm(train_loader)
         
-        for i, (X, y, _) in enumerate(train_loader, start=1):
+        for i, (X, y, _) in enumerate(stream, start=1):
             X = X.float().to(params["device"])
             y = y.float().to(params["device"])
 
@@ -122,20 +124,16 @@ class Trainer:
             loss.backward()
             optimizer.step()
 
-            # logging metrics
+            # logging and plotting metrics
             self.metric_monitor.update("loss", loss.item(), self.plot_dir)
-            y_hats.extend(y_hat.cpu().detach().numpy().tolist())
-            ys.extend(y.cpu().detach().numpy().tolist())
+            self.plot(y_hat=torch.mean(y_hat.cpu().detach()).item(), step=(i + (epoch-1) * len(train_loader)))
+            self.plot(y=torch.mean(y.cpu().detach()).item(), step=(i + (epoch-1) * len(train_loader)))
+            stream.set_description(
+                "Epoch: {epoch}. Train.      {metric_monitor}".format(epoch=epoch, metric_monitor=self.metric_monitor)
+            )
 
         # plotting metrics
-        ax.plot(range(len(ys)), ys, 'g', label="True Reward")
-        ax.plot(range(len(y_hats)), y_hats, 'r', label="Predicted Reward")
-        ax.legend()
-        ax.set_ylabel("Reward")
-        self.plot(epoch, fig)
-
-        plt.clf()
-        
+        self.plot(avg_loss=self.metric_monitor.metrics["loss"]["avg"], epoch=epoch)
 
     def train(self):
         self._setup_comet()
@@ -155,16 +153,26 @@ class Trainer:
         
 
 if __name__ == "__main__":
+    ap = ArgumentParser()
+    ap.add_argument("-n", "--num_epochs", required=True, type=int)
+    ap.add_argument("-r", "--run_name", required=True, default=1e-3)
+    ap.add_argument("-b", "--batch_size", required=False, default=32)
+    ap.add_argument("-l", "--lr", required=False, default=1e-3)
+    ap.add_argument("-t", "--network_type", required=False, default="mlp")
+    args = vars(ap.parse_args())
+
     train_json_list = [file.split("/")[-1] for file in glob("jsons/*.json")]
     train_dataset = RewardDataset(train_json_list, "jsons")
 
     params = {
-        "batch_size": 4,
-        "num_epochs": 5,
-        "lr": 1e-3,
+        "batch_size": args["batch_size"],
+        "num_epochs": args["num_epochs"],
+        "lr": args["lr"],
         "device": "cuda" if torch.cuda.is_available() else "cpu"
     }
-    
-    model = MLP_RewardPredictor(60, [64, 64, 1])
-    trainer = Trainer(model, train_dataset, params, "temp", "plots")
+    if args["network_type"] == "mlp":
+        model = MLP_RewardPredictor(60, [64, 64, 1])
+    else:
+        raise NotImplementedError
+    trainer = Trainer(model, train_dataset, params, args["run_name"], "plots")
     trainer.train()
