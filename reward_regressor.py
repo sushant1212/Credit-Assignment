@@ -114,7 +114,7 @@ class Trainer:
             y = y.float().to(params["device"])
 
             # forward pass
-            y_hat = model(X.reshape(X.shape[0], -1)).squeeze(-1)
+            y_hat = model(X.reshape(X.shape[0], -1).to(params["device"])).squeeze(-1)
 
             # computing loss
             loss = criterion(y_hat, y)
