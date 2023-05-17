@@ -13,25 +13,27 @@ from comet_ml import Experiment
 import torch.optim as optim
 from tqdm import tqdm
 from argparse import ArgumentParser
+import matplotlib.pyplot as plt
 
 
 class RewardDataset(Dataset):
-    def __init__(self, json_files:list, json_base_dir:str) -> None:
+    def __init__(self, json_files:list, json_base_dir:str, episode_length=25) -> None:
         self.json_files = json_files
         self.json_base_dir = json_base_dir
-
+        self.episode_length = episode_length
         assert(os.path.exists(json_base_dir)), f"{json_base_dir} does not exist!"
     
     def __len__(self):
-        return len(self.json_files)
+        return len(self.json_files) * self.episode_length
     
     def __getitem__(self, index):
-        json_file = self.json_files[index]
+        json_file_index = index // self.episode_length
+        data_index = index % self.episode_length
+        json_file = self.json_files[json_file_index]
         assert(os.path.exists(os.path.join(self.json_base_dir, json_file))), f"{os.path.join(self.json_base_dir, json_file)} does not exist!"
         with open(os.path.join(self.json_base_dir, json_file), "r+") as f:
             d = json.load(f)
-
-        return torch.tensor(d["state_actions"]), torch.tensor(d["global_rewards"]), torch.tensor(d["agent_rewards"])
+        return torch.tensor(d["state_actions"][data_index]), torch.tensor(d["global_rewards"][data_index]), torch.tensor(d["agent_rewards"][data_index])
 
 class TransformerRewardPredictor(nn.Module):
     def __init__(self, e_dim, d_k, mlp_hidden_layers) -> None:
@@ -70,7 +72,7 @@ class Trainer:
         self.train_dataset = train_dataset
         self.params = params
         self.run_name = run_name
-        self.metric_monitor = None
+        self.metric_monitor = MetricMonitor()
         self.plot_dir = plot_dir
         self.total_steps = 0
         
@@ -86,10 +88,6 @@ class Trainer:
         self.experiment.set_name(self.run_name)
         # logging hparams to comet_ml
         self.experiment.log_parameters(self.params)
-
-    def collate_fn(self, batch):
-        state_actions, global_rewards, agent_rewards = list(zip(*batch))
-        return torch.cat(state_actions, dim=0), torch.cat(global_rewards, dim=0), torch.cat(agent_rewards, dim=0)
     
     def plot(self, epoch=None, step=None, **kwargs):
         if epoch is not None:
@@ -106,9 +104,8 @@ class Trainer:
         model.train(True)
         self.epoch_loss = 0.0
         self.weight_values = None
-        self.metric_monitor = MetricMonitor()
         stream = tqdm(train_loader)
-        
+        epoch_loss = 0
         for i, (X, y, _) in enumerate(stream, start=1):
             X = X.float().to(params["device"])
             y = y.float().to(params["device"])
@@ -126,37 +123,45 @@ class Trainer:
 
             # logging and plotting metrics
             self.metric_monitor.update("loss", loss.item(), self.plot_dir)
+            self.metric_monitor.update("y_hat", torch.mean(y_hat.cpu().detach()).item(), self.plot_dir)
+            self.metric_monitor.update("y", torch.mean(y.cpu().detach()).item(), self.plot_dir)
             self.plot(y_hat=torch.mean(y_hat.cpu().detach()).item(), step=(i + (epoch-1) * len(train_loader)))
             self.plot(y=torch.mean(y.cpu().detach()).item(), step=(i + (epoch-1) * len(train_loader)))
+            epoch_loss += loss.item()
             stream.set_description(
                 "Epoch: {epoch}. Train.      {metric_monitor}".format(epoch=epoch, metric_monitor=self.metric_monitor)
             )
 
         # plotting metrics
-        self.plot(avg_loss=self.metric_monitor.metrics["loss"]["avg"], epoch=epoch)
+        self.plot(loss=epoch_loss, epoch=epoch)
 
-    def train(self):
+    def train(self, save_path):
         self._setup_comet()
+        
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
 
         train_loader = DataLoader(
             self.train_dataset,
             self.params["batch_size"],
             shuffle=True,
-            collate_fn=self.collate_fn
         )
 
         criterion = nn.HuberLoss()
         optimizer = optim.Adam(self.model.parameters(), lr=self.params["lr"])
         
-        for epoch in tqdm(range(self.params["num_epochs"])):
+        for epoch in range(self.params["num_epochs"]):
             self.train_one_epoch(train_loader, self.model, criterion, optimizer, epoch+1, self.params)
-        
+            if epoch % 10 == 0:
+                torch.save(self.model.state_dict(), os.path.join(save_path, "epoch_" + str(epoch).zfill(5) + ".pth"))
 
+        
 if __name__ == "__main__":
     ap = ArgumentParser()
     ap.add_argument("-n", "--num_epochs", required=True, type=int)
     ap.add_argument("-d", "--data_dir", required=True, type=str)
-    ap.add_argument("-r", "--run_name", required=True, default=1e-3)
+    ap.add_argument("-r", "--run_name", required=True, type=str)
+    ap.add_argument("-s", "--save_path", required=True, type=str)
     ap.add_argument("-b", "--batch_size", required=False, default=32, type=int)
     ap.add_argument("-l", "--lr", required=False, default=1e-3)
     ap.add_argument("-t", "--network_type", required=False, default="mlp")
@@ -172,8 +177,8 @@ if __name__ == "__main__":
         "device": "cuda" if torch.cuda.is_available() else "cpu"
     }
     if args["network_type"] == "mlp":
-        model = MLP_RewardPredictor(60, [64, 64, 1])
+        model = MLP_RewardPredictor(60, [128, 64, 4, 1])
     else:
         raise NotImplementedError
     trainer = Trainer(model, train_dataset, params, args["run_name"], "plots")
-    trainer.train()
+    trainer.train(args["save_path"])
