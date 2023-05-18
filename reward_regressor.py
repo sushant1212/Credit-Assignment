@@ -192,7 +192,7 @@ if __name__ == "__main__":
     ap.add_argument("-b", "--batch_size", required=False, default=32, type=int)
     ap.add_argument("-l", "--lr", required=False, default=1e-3)
     ap.add_argument("-t", "--network_type", required=False, default="mlp")
-    ap.add_argument("-x", "--disable_comet", required=False, default=False)
+    ap.add_argument("-x", "--disable_comet", required=False, default=False, type=bool)
     args = vars(ap.parse_args())
     data_dir = args["data_dir"]
     train_json_list = [file.split("/")[-1] for file in glob(f"{data_dir}/*.json")]
