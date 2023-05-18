@@ -43,6 +43,7 @@ class TransformerRewardPredictor(nn.Module):
         self.value_net = MLP(e_dim, [d_k])
         self.mlp = MLP(d_k, mlp_hidden_layers)
         self.attention_weights = None
+        self.d_k = d_k
 
     def forward(self, state_actions):
         # obtaining keys queries and values
@@ -56,7 +57,7 @@ class TransformerRewardPredictor(nn.Module):
 
         # MLP for predicting reward
         y_hat = self.mlp(self.attention_values)
-        return y_hat
+        return y_hat, self.attention_weights
     
 class MLP_RewardPredictor(nn.Module):
     def __init__(self, input_dim:int, hidden_layers:list) -> None:
@@ -67,14 +68,14 @@ class MLP_RewardPredictor(nn.Module):
         return self.mlp(x)
 
 class Trainer:
-    def __init__(self, model, train_dataset:RewardDataset, params, run_name, plot_dir) -> None:
+    def __init__(self, model, train_dataset:RewardDataset, params, run_name, plot_dir, disable_comet=False) -> None:
         self.model = model.to(params["device"])
         self.train_dataset = train_dataset
         self.params = params
         self.run_name = run_name
         self.metric_monitor = MetricMonitor()
         self.plot_dir = plot_dir
-        self.total_steps = 0
+        self.disable_comet = disable_comet
         
         if not os.path.exists(self.plot_dir):
             os.makedirs(plot_dir)
@@ -89,12 +90,14 @@ class Trainer:
         # logging hparams to comet_ml
         self.experiment.log_parameters(self.params)
     
-    def plot(self, epoch=None, step=None, **kwargs):
+    def plot(self, metrics:dict, epoch=None, step=None):
+        if self.disable_comet: return
+
         if epoch is not None:
-            self.experiment.log_metrics(kwargs, epoch=epoch)
+            self.experiment.log_metrics(metrics, epoch=epoch)
         
         elif step is not None:
-            self.experiment.log_metrics(kwargs, step=step)
+            self.experiment.log_metrics(metrics, step=step)
         
         else:
             raise NotImplementedError
@@ -106,12 +109,16 @@ class Trainer:
         self.weight_values = None
         stream = tqdm(train_loader)
         epoch_loss = 0
-        for i, (X, y, _) in enumerate(stream, start=1):
+        for i, (X, y, agent_rewards) in enumerate(stream, start=1):
             X = X.float().to(params["device"])
             y = y.float().to(params["device"])
 
             # forward pass
-            y_hat = model(X.reshape(X.shape[0], -1).to(params["device"])).squeeze(-1)
+            if isinstance(model, MLP_RewardPredictor):
+                y_hat = model(X.reshape(X.shape[0], -1).to(params["device"])).squeeze(-1)
+            elif isinstance(model, TransformerRewardPredictor):
+                y_hat, attention_weights = model(X)
+                y_hat = y_hat.squeeze(-1)
 
             # computing loss
             loss = criterion(y_hat, y)
@@ -125,18 +132,38 @@ class Trainer:
             self.metric_monitor.update("loss", loss.item(), self.plot_dir)
             self.metric_monitor.update("y_hat", torch.mean(y_hat.cpu().detach()).item(), self.plot_dir)
             self.metric_monitor.update("y", torch.mean(y.cpu().detach()).item(), self.plot_dir)
-            self.plot(y_hat=torch.mean(y_hat.cpu().detach()).item(), step=(i + (epoch-1) * len(train_loader)))
-            self.plot(y=torch.mean(y.cpu().detach()).item(), step=(i + (epoch-1) * len(train_loader)))
+            metrics = {}
+            metrics["y"] = torch.mean(y.cpu().detach()).item()
+            metrics["y_hat"] = torch.mean(y_hat.cpu().detach()).item()
+            self.plot(metrics, step=(i + (epoch-1) * len(train_loader)))
+
+            if isinstance(model, TransformerRewardPredictor):
+                other_metrics = {}
+                weight_entropy = -torch.mean(torch.sum(attention_weights * torch.log(torch.clamp(attention_weights, 1e-10,1.0)), dim=-1))
+                other_metrics["weight_entropy"] = weight_entropy.item()
+                batch_global_reward = torch.mean(y.cpu().detach())
+                batch_agent_rewards = torch.mean(agent_rewards, dim=0)
+                mean_attention_weights = torch.mean(attention_weights.cpu().detach().squeeze(1), dim=0)
+                other_metrics["batch_global_reward"] = batch_global_reward.item()
+                assert(batch_agent_rewards.shape == mean_attention_weights.shape)
+                for agent_index in range(batch_agent_rewards.shape[0]):
+                    other_metrics[f"batch_agent_reward_{agent_index}"] = batch_agent_rewards[agent_index].item()
+                    other_metrics[f"batch_agent_weight_{agent_index}"] = mean_attention_weights[agent_index].item()
+                    other_metrics[f"batch_agent_reward_{agent_index}/batch_global_reward"] = batch_agent_rewards[agent_index].item() / (batch_global_reward.item() + 1e-7)
+
+                self.plot(other_metrics, step=(i + (epoch-1) * len(train_loader)))
+
             epoch_loss += loss.item()
             stream.set_description(
                 "Epoch: {epoch}. Train.      {metric_monitor}".format(epoch=epoch, metric_monitor=self.metric_monitor)
             )
 
         # plotting metrics
-        self.plot(loss=epoch_loss, epoch=epoch)
+        self.plot({"loss": epoch_loss}, epoch=epoch)
 
     def train(self, save_path):
-        self._setup_comet()
+        if not self.disable_comet:
+            self._setup_comet()
         
         if not os.path.exists(save_path):
             os.makedirs(save_path)
@@ -152,7 +179,7 @@ class Trainer:
         
         for epoch in range(self.params["num_epochs"]):
             self.train_one_epoch(train_loader, self.model, criterion, optimizer, epoch+1, self.params)
-            if epoch % 10 == 0:
+            if (epoch+1) % 10 == 0:
                 torch.save(self.model.state_dict(), os.path.join(save_path, "epoch_" + str(epoch).zfill(5) + ".pth"))
 
         
@@ -165,6 +192,7 @@ if __name__ == "__main__":
     ap.add_argument("-b", "--batch_size", required=False, default=32, type=int)
     ap.add_argument("-l", "--lr", required=False, default=1e-3)
     ap.add_argument("-t", "--network_type", required=False, default="mlp")
+    ap.add_argument("-x", "--disable_comet", required=False, default=False)
     args = vars(ap.parse_args())
     data_dir = args["data_dir"]
     train_json_list = [file.split("/")[-1] for file in glob(f"{data_dir}/*.json")]
@@ -178,7 +206,7 @@ if __name__ == "__main__":
     }
     if args["network_type"] == "mlp":
         model = MLP_RewardPredictor(60, [128, 64, 4, 1])
-    else:
-        raise NotImplementedError
+    elif args["network_type"] == "transformer":
+        model = TransformerRewardPredictor(15, 15, [128, 64, 4, 1])
     trainer = Trainer(model, train_dataset, params, args["run_name"], "plots")
     trainer.train(args["save_path"])
