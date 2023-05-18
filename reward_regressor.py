@@ -208,5 +208,5 @@ if __name__ == "__main__":
         model = MLP_RewardPredictor(60, [128, 64, 4, 1])
     elif args["network_type"] == "transformer":
         model = TransformerRewardPredictor(15, 15, [128, 64, 4, 1])
-    trainer = Trainer(model, train_dataset, params, args["run_name"], "plots")
+    trainer = Trainer(model, train_dataset, params, args["run_name"], "plots", args["disable_comet"])
     trainer.train(args["save_path"])
