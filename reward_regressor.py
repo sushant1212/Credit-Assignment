@@ -189,9 +189,9 @@ class Trainer:
                 self.writer.add_scalar("weight_entropy", weight_entropy.item())
 
             epoch_loss += loss.item()
-            stream.set_description(
-                "Epoch: {epoch}. Train.      {metric_monitor}".format(epoch=epoch, metric_monitor=self.metric_monitor)
-            )
+            # stream.set_description(
+            #     "Epoch: {epoch}. Train.      {metric_monitor}".format(epoch=epoch, metric_monitor=self.metric_monitor)
+            # )
 
         # plotting metrics
         self.plot({"loss": epoch_loss}, epoch=epoch)
