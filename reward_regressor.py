@@ -125,7 +125,7 @@ class Trainer:
         model.train(True)
         self.epoch_loss = 0.0
         self.weight_values = None
-        stream = tqdm(train_loader)
+        # stream = tqdm(train_loader)
         epoch_loss = 0
         fig, ax = plt.subplots(nrows=4, ncols=1, figsize=(40, 40))
         agent_reward_by_global_reward = {}
@@ -139,7 +139,7 @@ class Trainer:
             ax[i].set_ylabel("batch_agent_reward / global_reward ")
         
 
-        for i, (X, y, agent_rewards) in enumerate(stream, start=1):
+        for i, (X, y, agent_rewards) in enumerate(train_loader, start=1):
             X = X.float().to(params["device"])
             y = y.float().to(params["device"])
 
