@@ -14,7 +14,7 @@ import torch.optim as optim
 from tqdm import tqdm
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt
-
+from torch.utils.tensorboard import SummaryWriter
 
 class RewardDataset(Dataset):
     def __init__(self, json_files:list, json_base_dir:str, episode_length=25) -> None:
@@ -89,15 +89,33 @@ class Trainer:
         self.experiment.set_name(self.run_name)
         # logging hparams to comet_ml
         self.experiment.log_parameters(self.params)
+
+    def _setup_tensorboard(self):
+        self.writer = SummaryWriter("runs/" + self.run_name)
+        # layout = {
+        #     "Loss Curve": {
+        #         "loss": ["Multiline", ["loss"]]
+        #     },
+        #     "Metrics": {
+        #         "Predicted vs Global Reward": ["Multiline", ["y", "y_hat"]],
+        #         "Weight Entropy": ["Multiline", ["weight_entropy"]]
+        #     }
+
+        # }
+        # self.writer.add_custom_scalars(layout)
     
     def plot(self, metrics:dict, epoch=None, step=None):
         if self.disable_comet: return
 
         if epoch is not None:
-            self.experiment.log_metrics(metrics, epoch=epoch)
+            # self.experiment.log_metrics(metrics, epoch=epoch)
+            for k, v in metrics.items():
+                self.writer.add_scalar(k, v, epoch)
         
         elif step is not None:
-            self.experiment.log_metrics(metrics, step=step)
+            # self.experiment.log_metrics(metrics, step=step)
+            for k, v in metrics.items():
+                self.writer.add_scalar(k, v, step)
         
         else:
             raise NotImplementedError
@@ -109,6 +127,18 @@ class Trainer:
         self.weight_values = None
         stream = tqdm(train_loader)
         epoch_loss = 0
+        fig, ax = plt.subplots(nrows=4, ncols=1, figsize=(40, 40))
+        agent_reward_by_global_reward = {}
+        agent_weight = {}
+        for i in range(4):
+            agent_reward_by_global_reward[i] = []
+            agent_weight[i] = []
+
+        for i in range(4):
+            ax[i].set_xlabel("batch_agent_weight")
+            ax[i].set_ylabel("batch_agent_reward / global_reward ")
+        
+
         for i, (X, y, agent_rewards) in enumerate(stream, start=1):
             X = X.float().to(params["device"])
             y = y.float().to(params["device"])
@@ -132,26 +162,31 @@ class Trainer:
             self.metric_monitor.update("loss", loss.item(), self.plot_dir)
             self.metric_monitor.update("y_hat", torch.mean(y_hat.cpu().detach()).item(), self.plot_dir)
             self.metric_monitor.update("y", torch.mean(y.cpu().detach()).item(), self.plot_dir)
-            metrics = {}
-            metrics["y"] = torch.mean(y.cpu().detach()).item()
-            metrics["y_hat"] = torch.mean(y_hat.cpu().detach()).item()
-            self.plot(metrics, step=(i + (epoch-1) * len(train_loader)))
+            # metrics = {}
+            # metrics["y"] = torch.mean(y.cpu().detach()).item()
+            # metrics["y_hat"] = torch.mean(y_hat.cpu().detach()).item()
+            # self.plot(metrics, step=(i + (epoch-1) * len(train_loader)))
+            self.writer.add_scalars("Global_reward_prediction", {"y": torch.mean(y.cpu().detach()).item(),
+                                                                 "y_hat": torch.mean(y_hat.cpu().detach()).item()}, (i + (epoch-1) * len(train_loader)))
 
             if isinstance(model, TransformerRewardPredictor):
-                other_metrics = {}
+                # other_metrics = {}
                 weight_entropy = -torch.mean(torch.sum(attention_weights * torch.log(torch.clamp(attention_weights, 1e-10,1.0)), dim=-1))
-                other_metrics["weight_entropy"] = weight_entropy.item()
+                # other_metrics["weight_entropy"] = weight_entropy.item()
                 batch_global_reward = torch.mean(y.cpu().detach())
                 batch_agent_rewards = torch.mean(agent_rewards, dim=0)
                 mean_attention_weights = torch.mean(attention_weights.cpu().detach().squeeze(1), dim=0)
-                other_metrics["batch_global_reward"] = batch_global_reward.item()
+                # other_metrics["batch_global_reward"] = batch_global_reward.item()
                 assert(batch_agent_rewards.shape == mean_attention_weights.shape)
                 for agent_index in range(batch_agent_rewards.shape[0]):
-                    other_metrics[f"batch_agent_reward_{agent_index}"] = batch_agent_rewards[agent_index].item()
-                    other_metrics[f"batch_agent_weight_{agent_index}"] = mean_attention_weights[agent_index].item()
-                    other_metrics[f"batch_agent_reward_{agent_index}/batch_global_reward"] = batch_agent_rewards[agent_index].item() / (batch_global_reward.item() + 1e-7)
+                    # other_metrics[f"batch_agent_reward_{agent_index}"] = batch_agent_rewards[agent_index].item()
+                    # other_metrics[f"batch_agent_weight_{agent_index}"] = mean_attention_weights[agent_index].item()
+                    # other_metrics[f"batch_agent_reward_{agent_index}/batch_global_reward"] = batch_agent_rewards[agent_index].item() / (batch_global_reward.item() + 1e-7)
+                    agent_weight[agent_index].append(mean_attention_weights[agent_index].item())
+                    agent_reward_by_global_reward[agent_index].append(batch_agent_rewards[agent_index].item() / (batch_global_reward.item() + 1e-7))
 
-                self.plot(other_metrics, step=(i + (epoch-1) * len(train_loader)))
+                # self.plot(other_metrics, step=(i + (epoch-1) * len(train_loader)))
+                self.writer.add_scalar("weight_entropy", weight_entropy.item())
 
             epoch_loss += loss.item()
             stream.set_description(
@@ -160,10 +195,17 @@ class Trainer:
 
         # plotting metrics
         self.plot({"loss": epoch_loss}, epoch=epoch)
+        for i in range(4):
+            ax[i].scatter(agent_weight[i], agent_reward_by_global_reward[i])
+        self.writer.add_figure("(Agent_reward / global reward) vs weight", fig, epoch)
+        self.writer.flush()
+        plt.clf()
+        plt.close()
 
     def train(self, save_path):
         if not self.disable_comet:
-            self._setup_comet()
+            # self._setup_comet()
+            self._setup_tensorboard()
         
         if not os.path.exists(save_path):
             os.makedirs(save_path)
