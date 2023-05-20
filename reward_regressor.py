@@ -186,7 +186,7 @@ class Trainer:
                     agent_reward_by_global_reward[agent_index].append(batch_agent_rewards[agent_index].item() / (batch_global_reward.item() + 1e-7))
 
                 # self.plot(other_metrics, step=(i + (epoch-1) * len(train_loader)))
-                self.writer.add_scalar("weight_entropy", weight_entropy.item())
+                self.writer.add_scalar("weight_entropy", weight_entropy.item(), (i + (epoch-1) * len(train_loader)))
 
             epoch_loss += loss.item()
             # stream.set_description(
@@ -197,7 +197,9 @@ class Trainer:
         self.plot({"loss": epoch_loss}, epoch=epoch)
         for i in range(4):
             ax[i].scatter(agent_weight[i], agent_reward_by_global_reward[i])
-        self.writer.add_figure("(Agent_reward / global reward) vs weight", fig, epoch)
+        # self.writer.add_figure("(Agent_reward / global reward) vs weight", fig, epoch)
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.plot_dir, "fig_" + str(epoch).zfill(3) + ".png"))
         self.writer.flush()
         plt.clf()
         plt.close()
