@@ -50,6 +50,7 @@ class ActorCriticAgent:
             lambd=0.95,
             entropy_penalty=1e-3,
             max_cycles:int=100,
+            device_id=0,
         ) -> None:
         self.n_agents = n_agents
         self.max_cycles = max_cycles
@@ -62,7 +63,7 @@ class ActorCriticAgent:
         self.env_obs_dim = self.env.observation_space("agent_0").shape[0]
 
         # setting torch device
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = "cuda:"+str(device_id) if torch.cuda.is_available() else "cpu"
 
         # creating actor and critic networks
         self.actor = Actor(self.env_obs_dim + (self.n_agents-1) * 4, actor_hidden_layers, self.env_action_dim).to(self.device)  # obs of current agent concatenated with relative px, py, vx, vy of other agents 
