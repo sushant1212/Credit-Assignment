@@ -41,4 +41,4 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError
     
-    agent.train(args["nume_episodes"], args["save_path"])
+    agent.train(args["num_episodes"], args["save_path"])
