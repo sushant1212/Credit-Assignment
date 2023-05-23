@@ -314,9 +314,9 @@ class ActorCriticAgent:
             # save model
             if(episode % 500 == 0): self.save(model_save_path, episode)
 
-            stream.set_description(
-                f"Episode {episode+1}:  {self.agent_metric_monitor}"
-            )
+            # stream.set_description(
+            #     f"Episode {episode+1}:  {self.agent_metric_monitor}"
+            # )
 
     def eval(self, actor_path, n_episodes, render=False):
         try:
