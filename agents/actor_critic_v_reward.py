@@ -12,7 +12,7 @@ import os
 from comet_ml import Experiment
 from tqdm import tqdm
 import sys
-from agents.actor_critic_v import Actor, Critic
+from agents.models import Actor, Critic
 from reward_regressor import TransformerRewardPredictor
 
 class ActorCriticRewardAgent:

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from agents.models import MLP
+from agents.models import MLP, Actor, Critic
 from typing import List
 import simple_spread_custom 
 import numpy as np
@@ -13,30 +13,6 @@ from comet_ml import Experiment
 from tqdm import tqdm
 import sys
 
-class Actor(nn.Module):
-    def __init__(self, obs_dim:int, hidden_layers:List[int], last_layer_dim:int) -> None:
-        super(Actor, self).__init__()
-        self.obs_dim = obs_dim
-        self.hidden_layers = hidden_layers
-        self.last_layer_dim = last_layer_dim
-        self.net = MLP(self.obs_dim, self.hidden_layers + [self.last_layer_dim])
-
-    def forward(self, x):
-        x = self.net(x)
-        return x
-    
-class Critic(nn.Module):
-    def __init__(self, input_dim:int, hidden_layers:List[int], last_layer_dim:int) -> None:
-        super(Critic, self).__init__()
-        self.input_dim = input_dim
-        self.hidden_layers = hidden_layers
-        self.last_layer_dim = last_layer_dim
-        self.net = MLP(self.input_dim, self.hidden_layers + [self.last_layer_dim])
-
-    def forward(self, x):
-        x = self.net(x)
-        return x
-    
 class ActorCriticAgent:
     def __init__(
             self,
@@ -50,10 +26,12 @@ class ActorCriticAgent:
             lambd=0.95,
             entropy_penalty=1e-3,
             max_cycles:int=100,
+            update_freq:int=1,  # number of episodes per update
             device_id=0,
         ) -> None:
         self.n_agents = n_agents
         self.max_cycles = max_cycles
+        self.update_freq = update_freq
 
         assert(self.n_agents >= 1), "Number of agents should be greater than 0"
         self.env = simple_spread_custom.env(max_cycles=max_cycles, N=self.n_agents)
@@ -307,8 +285,10 @@ class ActorCriticAgent:
                 self.curr_agent_index += 1
                 self.curr_agent_index %= self.n_agents
             
-            # update networks
-            self.update()
+            # update networks after every update freq episodes 
+            if (episode + 1) % self.update_freq == 0:
+                self.update()
+
             # update plots
             self.plot(model_save_path, episode+1)
             # save model
