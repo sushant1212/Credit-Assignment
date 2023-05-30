@@ -9,7 +9,7 @@ from argparse import ArgumentParser
 
 if __name__ == "__main__":
     ap = ArgumentParser()
-    ap.add_argument("-t", "--type", type=str, required=True, help="actor_critic or actor_critic_reward")
+    ap.add_argument("-t", "--type", type=str, required=True, help="actor_critic / actor_critic_reward / actor_critic_with_reward_training")
     ap.add_argument("-r", "--run_name", type=str, required=True)
     ap.add_argument("-s", "--save_path", type=str, required=True)
     ap.add_argument("-d", "--device", type=int, required=False, default=0)
