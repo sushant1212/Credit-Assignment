@@ -270,10 +270,9 @@ class ActorCriticRewardAgent:
             self.total_grad_norm = 0.0
             prev_global_state = None
 
-            for agent in self.env.agent_iter():
-                # storing variables
-                global_reward = 0.0
+            global_reward = 0.0
 
+            for agent in self.env.agent_iter():
                 # this reward is R_t and not R_t+1. Also terminated and truncated are current states
                 obs, rew, terminated, truncated, info = self.env.last()
 
@@ -307,6 +306,9 @@ class ActorCriticRewardAgent:
                 if not done:
                     self.trajectory[self.curr_agent_index].append([obs, agent_obs, action])
                 
+                self.episode_reward += rew
+                self.agent_rewards[self.curr_agent_index] += rew
+
                 self.curr_agent_index += 1
                 self.curr_agent_index %= self.n_agents
                 
@@ -335,9 +337,6 @@ class ActorCriticRewardAgent:
                     prev_global_state = global_state.reshape(self.n_agents, -1)
                     global_reward = 0.0
 
-                self.episode_reward += rew
-                self.agent_rewards[self.curr_agent_index] += rew
-            
             # update networks
             self.update()
             # update plots
