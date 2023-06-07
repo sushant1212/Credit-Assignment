@@ -12,85 +12,8 @@ from agents.utils import MetricMonitor
 import os
 from comet_ml import Experiment
 from tqdm import tqdm
-from agents.models import Actor, Critic, TransformerRewardPredictor
+from agents.models import Actor, Critic, TransformerRewardPredictor, RewardDatasetList, ReplayBuffer
 from torch.utils.data import Dataset, DataLoader
-
-class RewardDatasetList(Dataset):
-    def __init__(self, state_actions_list:list, global_reward_list:list) -> None:
-        assert len(state_actions_list) == len(global_reward_list)
-        self.state_actions = torch.tensor(state_actions_list)
-        self.global_rewards = torch.tensor(global_reward_list)
-
-    def __len__(self):
-        return self.state_actions.shape[0]
-    
-    def __getitem__(self, index):
-        return self.state_actions[index], self.global_rewards[index]
-    
-class ReplayBuffer:
-    def __init__(self, n_agents) -> None:
-        self.n_agents = n_agents
-        self.agent_buffers = [{} for _ in range(self.n_agents)]
-        self.allowed_keys = set([
-                "state", 
-                "state_combined", 
-                "action",
-                "reward",
-                "next_state",
-                "next_state_combined",
-                "done"
-            ])
-
-    def add_values(self, agent_id, **kwargs):
-        agent_dict = self.agent_buffers[agent_id]
-        for k, v in kwargs.items():
-            assert(k in self.allowed_keys), f"Unknown key \"{k}\" found"
-            # converting value to torch tensor
-            if type(v) == list:
-                v = torch.from_numpy(np.array(v))
-            elif type(v) == np.ndarray:
-                v = torch.from_numpy(v)
-            elif type(v) == torch.Tensor:
-                pass
-            else:
-                raise TypeError(f"Inappropriate type {type(v)} found")
-
-            # adding to the corresponding dictionary
-            if k not in agent_dict:
-                agent_dict[k] = v
-            else:
-                agent_dict[k] = torch.cat((agent_dict[k], v), dim=0)
-
-    def update_values(self, agent_id, **kwargs):
-        agent_dict = self.agent_buffers[agent_id]
-        for k, v in kwargs.items():
-            assert(k in self.allowed_keys), f"Unknown key \"{k}\" found"
-            # converting value to torch tensor
-            if type(v) == list:
-                v = torch.from_numpy(np.array(v))
-            elif type(v) == np.ndarray:
-                v = torch.from_numpy(v)
-            elif type(v) == torch.Tensor:
-                pass
-            else:
-                raise TypeError(f"Inappropriate type {type(v)} found")
-            
-            assert k in agent_dict, f"Unknown Key {k}"
-            assert agent_dict[k].shape == v.shape, f"Shapes do not match: {agent_dict[k].shape} and {v.shape}"
-
-            agent_dict[k] = v
-    
-    def clear(self):
-        del self.agent_buffers
-        self.agent_buffers = [{} for _ in range(self.n_agents)]
-
-    def get(self, agent_index, key):
-        assert key in self.allowed_keys
-        return self.agent_buffers[agent_index][key]
-
-    def __getitem__(self, key:str):
-        assert (key in self.allowed_keys), f"Unknown key {key} given"
-        return [self.agent_buffers[ind][key] for ind in range(self.n_agents)]
 
 class ActorCriticRewardTrainerAgent:
     def __init__(
@@ -197,9 +120,8 @@ class ActorCriticRewardTrainerAgent:
         optimizer = optim.Adam(self.reward_model.parameters(), lr=self.reward_net_lr)
 
         self.reward_model.train(True)
-        for epoch in range(self.reward_net_epochs):
-            self.reward_net_loss = 0.0
 
+        for epoch in range(self.reward_net_epochs):
             for i, (X, y) in enumerate(train_loader, start=1):
                 X = X.float().to(self.device)
                 y = y.float().to(self.device)
@@ -214,6 +136,7 @@ class ActorCriticRewardTrainerAgent:
                 optimizer.step()
 
                 self.reward_net_loss += loss.item()
+        self.reward_net_loss /= self.reward_net_epochs
         return
     
     def update(self):
@@ -331,9 +254,11 @@ class ActorCriticRewardTrainerAgent:
         
         actor_save_path = os.path.join(model_save_path, "models", "actor_episode_" + str(episode).zfill(8) + ".pth")
         critic_save_path = os.path.join(model_save_path, "models", "critic_episode_" + str(episode).zfill(8) + ".pth")
+        reward_save_path = os.path.join(model_save_path, "models", "reward_episode_" + str(episode).zfill(8) + ".pth")
 
         torch.save(self.actor.state_dict(), actor_save_path)
         torch.save(self.critic.state_dict(), critic_save_path)
+        torch.save(self.reward_model.state_dict(), reward_save_path)
     
     @torch.no_grad()
     def calculate_agent_rewards(self, global_reward, state_actions):
@@ -377,9 +302,7 @@ class ActorCriticRewardTrainerAgent:
         self.train_metric_monitor = MetricMonitor()
         self.agent_metric_monitor = MetricMonitor()
         
-        stream = tqdm(range(n_episodes))
-
-        for episode in stream:
+        for episode in tqdm(range(n_episodes)):
             # reset the environment
             self.env.reset()
 
@@ -402,7 +325,7 @@ class ActorCriticRewardTrainerAgent:
             self.episode_reward = 0
             self.agent_rewards = [0.0 for _ in range(self.n_agents)]
 
-            # initialising episode related variables
+            # initialising episode related variables / flags
             global_reward = 0.0
             state = None
             actions = []
@@ -417,7 +340,7 @@ class ActorCriticRewardTrainerAgent:
                 # global state of the env is the concatenation of individual states of agents
                 global_state = self.env.state()
 
-                # storing state
+                # storing global state
                 state = global_state.reshape(self.n_agents, -1)
 
                 # making feature vector for current agent that encodes other agent states as well
@@ -432,7 +355,6 @@ class ActorCriticRewardTrainerAgent:
                 # the agent has already terminated or truncated
                 if terminated or truncated:
                     self.env.step(None)
-                
                 else:
                     self.env.step(action)
 
