@@ -37,7 +37,7 @@ class AREL_RewardTrainer:
             entropy_penalty=1e-3,
             max_cycles:int=100,
             update_freq:int=500,  # number of episodes per update (reward model)
-            reward_net_epochs=100,  # number of epochs to train the reward network for
+            reward_net_epochs=40,  # number of epochs to train the reward network for
             reward_net_lr=1e-3,  # learning rate of the reward network
             reward_net_type="transformer",
             device_id=0,
