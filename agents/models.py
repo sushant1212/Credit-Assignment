@@ -220,6 +220,7 @@ class ReplayBuffer:
         if not (isinstance(reward_model, AgentSelfAttentionReward_AREL) or isinstance(reward_model, AgentTransformerReward_AREL)): 
             raise NotImplementedError
         reward_model.eval()
+        reward_model.to(device)
         
         state_actions = self.global_buffer["state_action"]
         state_actions = state_actions.to(device)

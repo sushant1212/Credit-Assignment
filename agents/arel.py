@@ -70,13 +70,13 @@ class AREL_RewardTrainer:
         assert(reward_net_type == "transformer" or reward_net_type == "self-attention"), "parameter reward_net_type should be \"transformer\" or \"self-attention\"" 
         if reward_net_type == "transformer":
             try:
-                self.reward_model = AgentTransformerReward_AREL(**reward_net_kwargs)
+                self.reward_model = AgentTransformerReward_AREL(**reward_net_kwargs).to(self.device)
             except Exception as e:
                 print(e)
                 sys.exit(0)
         else:
             try:
-                self.reward_model = AgentSelfAttentionReward_AREL(**reward_net_kwargs)
+                self.reward_model = AgentSelfAttentionReward_AREL(**reward_net_kwargs).to(self.device)
             except Exception as e:
                 print(e)
                 sys.exit(0)
