@@ -67,11 +67,9 @@ if __name__ == "__main__":
             },
             reward_net_type="transformer",
             device_id=args["device"],
-            update_freq=10,
-            reward_net_epochs=10
         )
 
     else:
         raise NotImplementedError
     
-    agent.train(args["num_episodes"], args["save_path"], plot=False)
+    agent.train(args["num_episodes"], args["save_path"])
