@@ -360,6 +360,7 @@ for i_episode in range(args.num_episodes):
             epoch_train_episode_reward_loss.append(loss)
             epoch_train_step_reward_loss.append(loss_2)
             epoch_train_reg_loss.append(loss_3)
+        torch.save(reward_model.state_dict(), os.path.join(os.path.join(exp_save_dir, f'reward_model_{i_episode+1}.pth')))
         writer.add_scalar(args.exp_name + f'_episode_reward_loss', np.mean(epoch_train_episode_reward_loss), i_episode)
         writer.add_scalar(args.exp_name + f'_step_reward_loss', np.mean(epoch_train_step_reward_loss), i_episode)
         writer.add_scalar(args.exp_name + f'_reg_loss', np.mean(epoch_train_reg_loss), i_episode)
