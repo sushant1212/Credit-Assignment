@@ -222,7 +222,6 @@ def sample_and_pred(memory, model, batch_size, n_agents, n_trajectories=128):
     next_states = np.array(samples.next_states)[ind1[:,None], ind2].reshape(batch_size,-1)
     # rewards = pred_rewards[ind1[:,None], ind2].reshape(batch_size,-1)
     rewards = np.array(samples.rewards)[ind1[:,None], ind2].reshape(batch_size,-1)
-    print("************************** yay **************************")
 
     return Transition(states, actions, masks, next_states, rewards)
 
