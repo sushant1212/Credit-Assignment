@@ -25,7 +25,7 @@ from pathlib import Path
 
 save_path = str(Path(os.path.abspath(__file__)).parents[2]) + '/results'
 save_model_path = save_path + '/ckpt_plot'
-tensorboard_path = save_path + '/runs'
+# tensorboard_path = save_path + '/runs'
 
 sys.path.append(str(Path(os.path.abspath(__file__)).parents[1])+'/former')
 sys.path.append(str(Path(os.path.abspath(__file__)).parents[1])+'/maddpg')
@@ -172,6 +172,7 @@ rewards = []
 total_numsteps = 0
 updates = 0
 exp_save_dir = os.path.join(args.save_dir, args.exp_name)
+tensorboard_path = exp_save_dir + '/runs'
 os.makedirs(exp_save_dir, exist_ok=True)
 best_eval_reward, best_good_eval_reward, best_adversary_eval_reward = -1000000000, -1000000000, -1000000000
 start_time = time.time()
