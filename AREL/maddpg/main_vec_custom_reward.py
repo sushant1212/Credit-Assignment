@@ -251,9 +251,9 @@ reward_model = CustomTimeRewardNet(
 )
 
 
-if torch.cuda.device_count() > 1:
-    print("Let's use", torch.cuda.device_count(), "GPUs!")
-    reward_model = nn.DataParallel(reward_model)
+# if torch.cuda.device_count() > 1:
+#     print("Let's use", torch.cuda.device_count(), "GPUs!")
+#     reward_model = nn.DataParallel(reward_model)
 
 if torch.cuda.is_available():
     reward_model.cuda()
