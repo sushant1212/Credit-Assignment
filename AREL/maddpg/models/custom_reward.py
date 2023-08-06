@@ -89,8 +89,5 @@ class CustomTimeRewardNet(nn.Module):
         mean_episode_embedding = (weights.unsqueeze(1) @ episode_embeddings).squeeze(1)
         assert(mean_episode_embedding.shape[-1] == self.episode_embedding_dim)
 
-        episode_reward = self.reward_mlp(mean_episode_embedding)
-        assert(episode_reward.shape[-1] == 1)
-
+        episode_reward = self.reward_mlp(mean_episode_embedding).squeeze(-1)
         return episode_reward, weights
-
