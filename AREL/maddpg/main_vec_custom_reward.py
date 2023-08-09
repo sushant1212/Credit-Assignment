@@ -244,10 +244,10 @@ reward_model = CustomTimeRewardNet(
     state_embedding_dim=128,
     episode_length=args.num_steps,
     episode_embedding_dim=128,
-    mlp1_hidden_layers=[256],
-    mlp2_hidden_layers=[256, 128, 32],
-    mlp3_hidden_layers=[256],
-    reward_mlp_hidden_layers=[256, 128, 32]
+    mlp1_hidden_layers=[256, 128],
+    mlp2_hidden_layers=[256, 128, 128],
+    mlp3_hidden_layers=[256, 128],
+    reward_mlp_hidden_layers=[256, 128, 128]
 )
 
 
