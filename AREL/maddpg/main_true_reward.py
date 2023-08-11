@@ -381,6 +381,7 @@ for i_episode in range(args.num_episodes):
         copy_actor_policy(agent, eval_agent)
         test_q.put([eval_agent, tr_log])
 
+np.save(os.path.join(exp_save_dir, "reward_cuve"), np.array(rewards), allow_pickle=True, fix_imports=True)
 env.close()
 time.sleep(5)
 done_training.value = True
