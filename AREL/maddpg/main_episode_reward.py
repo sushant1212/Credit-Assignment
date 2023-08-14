@@ -215,6 +215,9 @@ def sample_and_pred(memory, model, batch_size, n_agents, n_trajectories=128):
     rewards = np.array(list(samples.rewards)).reshape(n_trajectories, args.num_steps, n_agents, -1).transpose((0,2,1,3))
     rewards = np.sum(np.squeeze(rewards[:,0,:,:],axis=2), axis=1).reshape(n_trajectories, 1)
     rewards = np.repeat(rewards, args.num_steps, axis=1)
+    mask = np.zeros(rewards.shape)
+    mask[:, -1] = 1
+    rewards = rewards * mask
     rewards = np.repeat(rewards[:, :, np.newaxis], n_agents, axis=2)
     ind1 = np.arange(n_trajectories)
     ind2 = np.random.randint(args.num_steps, size=(n_trajectories, int(batch_size/n_trajectories)))
