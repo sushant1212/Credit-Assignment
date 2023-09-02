@@ -102,6 +102,7 @@ parser.add_argument('--steps_per_critic_update', type=int, default=100)
 #parser.add_argument('--episodes_per_update', type=int, default=4)
 parser.add_argument('--target_update_mode', default='soft', help='soft | hard | episodic')
 parser.add_argument('--cuda', default=False, action='store_true')
+parser.add_argument("--gpu_id", default="0", type=str, required=False)
 parser.add_argument('--eval_freq', type=int, default=1000)
 args = parser.parse_args()
 if args.exp_name is None:
@@ -114,7 +115,7 @@ print("========================================")
 
 
 torch.set_num_threads(1)
-device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+device = torch.device("cuda:" + str(args.gpu_id) if torch.cuda.is_available() and args.cuda else "cpu")
 
 
 env = make_env(args.scenario, None)
@@ -234,12 +235,13 @@ reward_model = former.Time_Agent_Transformer(emb=state_emb, heads=n_heads,
                             depth=depth, seq_length=time_length, 
                             n_agents=n_agents, agent=True, dropout=0.0)
 
-if torch.cuda.device_count() > 1:
-    print("Let's use", torch.cuda.device_count(), "GPUs!")
-    reward_model = nn.DataParallel(reward_model)
+# if torch.cuda.device_count() > 1:
+#     print("Let's use", torch.cuda.device_count(), "GPUs!")
+#     reward_model = nn.DataParallel(reward_model)
 
 if torch.cuda.is_available():
-    reward_model.cuda()
+    # reward_model.cuda()
+    reward_model = reward_model.to("cuda:"+str(args.gpu_id))
 
 # model(x.to(device))
 opt = torch.optim.Adam(lr=0.0001, params=reward_model.parameters(), weight_decay=1e-5)
