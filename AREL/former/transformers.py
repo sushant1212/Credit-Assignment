@@ -13,11 +13,12 @@ class Time_Agent_Transformer(nn.Module):
     """
 
     def __init__(self, emb, heads, depth, seq_length, n_agents, agent=True, 
-                                        dropout=0.0, wide=True, comp=True):
+                                        dropout=0.0, wide=True, comp=True, device=None):
         super().__init__()
 
         self.comp = comp
         self.n_agents = n_agents
+        self.device = device
         if emb>100:
             self.comp_emb = 100
         else:
@@ -79,10 +80,10 @@ class Time_Agent_Transformer(nn.Module):
         
         b, n_a, t, e = x.size()
         if not self.comp:
-            positions = self.pos_embedding(torch.arange(t, device=d()))[None, :, :].expand(b*n_a, t, e)
+            positions = self.pos_embedding(torch.arange(t, device=(self.device if self.device is not None else d())))[None, :, :].expand(b*n_a, t, e)
             x = x.view(b*n_a, t, e) + positions
         else:
-            positions = self.pos_embedding(torch.arange(t, device=d()))[None, :, :].expand(b*n_a, t, self.comp_emb)
+            positions = self.pos_embedding(torch.arange(t, device=(self.device if self.device is not None else d())))[None, :, :].expand(b*n_a, t, self.comp_emb)
             x = self.compress_input(x).view(b*n_a, t, self.comp_emb) + positions
 
         # x = self.do(x)
@@ -103,9 +104,9 @@ class Time_Transformer(nn.Module):
     Transformer along time steps only.
     """
 
-    def __init__(self, emb, heads, depth, seq_length, n_agents, dropout=0.0, wide=True, comp=True):
+    def __init__(self, emb, heads, depth, seq_length, n_agents, dropout=0.0, wide=True, comp=True, device=None):
         super().__init__()
-
+        self.device = device
         self.comp = comp
         self.n_agents = n_agents
         self.comp_emb = int(1.5*emb//n_agents)
@@ -152,10 +153,10 @@ class Time_Transformer(nn.Module):
         
         batch_size, t, e = x.size()
         if not self.comp:
-            positions = self.pos_embedding(torch.arange(t, device=d()))[None, :, :].expand(batch_size, t, e)
+            positions = self.pos_embedding(torch.arange(t, device=(self.device if self.device is not None else d())))[None, :, :].expand(batch_size, t, e)
             x = x + positions
         else:
-            positions = self.pos_embedding(torch.arange(t, device=d()))[None, :, :].expand(batch_size, t, self.comp_emb)
+            positions = self.pos_embedding(torch.arange(t, device=(self.device if self.device is not None else d())))[None, :, :].expand(batch_size, t, self.comp_emb)
             x = self.compress_input(x) + positions
 
         # x = self.do(x)

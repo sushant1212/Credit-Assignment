@@ -233,7 +233,7 @@ depth = 3
 
 reward_model = former.Time_Agent_Transformer(emb=state_emb, heads=n_heads, 
                             depth=depth, seq_length=time_length, 
-                            n_agents=n_agents, agent=True, dropout=0.0)
+                            n_agents=n_agents, agent=True, dropout=0.0, device=device)
 
 # if torch.cuda.device_count() > 1:
 #     print("Let's use", torch.cuda.device_count(), "GPUs!")
