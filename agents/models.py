@@ -94,6 +94,48 @@ class TransformerRewardPredictor(nn.Module):
         y_hat = self.mlp(self.attention_values)
         return y_hat, self.attention_weights
     
+class TransformerRewardPredictorNew(nn.Module):
+    def __init__(self, e_dim, d_k, mlp_hidden_layers) -> None:
+        super(TransformerRewardPredictorNew, self).__init__()
+        self.d_k = d_k
+        self.e_dim = e_dim
+
+        # Key, Query and Value Nets
+        self.key_net = MLP(e_dim, [d_k])
+        self.query_net = MLP(e_dim, [d_k])
+        self.value_net = MLP(e_dim, [d_k])
+        
+        # Feed forward network
+        self.ff = nn.Sequential(
+            nn.Linear(self.d_k, self.d_k * 4),
+            nn.ReLU(),
+            nn.Linear(self.d_k * 4, self.d_k)
+        )
+
+        # layer norms
+        self.ln1 = nn.LayerNorm(self.d_k)
+        self.ln2 = nn.LayerNorm(self.d_k)
+
+        # Final MLP to predict global reward
+
+        
+        self.mlp = MLP(d_k, mlp_hidden_layers)
+        self.attention_weights = None
+
+    def forward(self, state_actions):
+        # obtaining keys queries and values
+        self.query = self.query_net(torch.sum(state_actions, dim=1, keepdim=True))
+        self.key = self.key_net(state_actions)
+        self.value = self.value_net(state_actions)
+
+        # self attention layer
+        self.attention_weights = F.softmax((self.query @ self.key.permute(0, 2, 1) / sqrt(self.d_k)), dim=-1)
+        self.attention_values =  (self.attention_weights @ self.value).squeeze(1)
+
+        # MLP for predicting reward
+        y_hat = self.mlp(self.attention_values)
+        return y_hat, self.attention_weights
+    
 class MLP_RewardPredictor(nn.Module):
     def __init__(self, input_dim:int, hidden_layers:list) -> None:
         super(MLP_RewardPredictor, self).__init__()
@@ -217,20 +259,20 @@ class ReplayBuffer:
     
     @torch.no_grad()
     def predict_and_update_rewards(self, reward_model:nn.Module, device):
-        if not (isinstance(reward_model, AgentSelfAttentionReward_AREL) or isinstance(reward_model, AgentTransformerReward_AREL)): 
-            raise NotImplementedError
         reward_model.eval()
         reward_model.to(device)
-        
-        state_actions = self.global_buffer["state_action"]
-        state_actions = state_actions.to(device)
-        agent_rewards, _ = reward_model(state_actions)
-        assert(len(agent_rewards.shape) == 2)
-        agent_rewards = torch.permute(agent_rewards, (1, 0))
-        agent_rewards_list = list(agent_rewards)
-        for ind, reward_tensor in enumerate(agent_rewards_list):
-            self.update_values(ind, reward=reward_tensor.detach().cpu())
-        return agent_rewards
+        if (isinstance(reward_model, AgentSelfAttentionReward_AREL) or isinstance(reward_model, AgentTransformerReward_AREL)): 
+            state_actions = self.global_buffer["state_action"]
+            state_actions = state_actions.to(device)
+            agent_rewards, _ = reward_model(state_actions)
+            assert(len(agent_rewards.shape) == 2)
+            agent_rewards = torch.permute(agent_rewards, (1, 0))
+            agent_rewards_list = list(agent_rewards)
+            for ind, reward_tensor in enumerate(agent_rewards_list):
+                self.update_values(ind, reward=reward_tensor.detach().cpu())
+            return agent_rewards
+        elif isinstance(reward_model, TransformerRewardPredictor):
+            pass
 
     def __getitem__(self, key:str):
         assert (key in self.agent_allowed_keys or key in self.global_keys), f"Unknown key {key} given"
@@ -311,10 +353,10 @@ class AgentTransformerReward_AREL(nn.Module):
         # add + norm
         x = self.ln2(feedforward + x)
 
-        # pass thorugh MLP
+        # pass through MLP
         reward_values = self.mlp(x).squeeze(-1)
 
-        return reward_values,  self.attention_weights
+        return reward_values, self.attention_weights
         
 if __name__ == "__main__":
     d = {
