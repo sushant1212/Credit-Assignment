@@ -93,6 +93,71 @@ class TransformerRewardPredictor(nn.Module):
         # MLP for predicting reward
         y_hat = self.mlp(self.attention_values)
         return y_hat, self.attention_weights
+
+class TransformerRewardPredictor_v2(nn.Module):
+    def __init__(self, obs_input_dim, action_dim, mlp_hidden_layers) -> None:
+        super(TransformerRewardPredictor, self).__init__()
+        self.feature_norm = nn.LayerNorm(obs_input_dim)
+        self.embedding_net = nn.Sequential(
+            nn.Linear(obs_input_dim+action_dim, 64),
+            nn.LayerNorm(64),
+            nn.GELU(),
+        )
+        self.key_net = nn.Linear(64, 64)
+        self.query_net = nn.Linear(64, 64)
+        self.value_net = nn.Linear(64, 64)
+
+        self.value_norm = nn.LayerNorm(64)
+        self.value_linear = nn.Sequential(
+            nn.Linear(64, 1024),
+            nn.GELU(),
+            nn.Linear(1024, 64)
+        )
+        self.value_linear_norm = nn.LayerNorm(64)
+        self.mlp = nn.Sequential(
+            nn.Linear(64, 64),
+            nn.LayerNorm(64),
+            nn.GELU(),
+            nn.Linear(64, 1)
+        )
+        # self.attention_weights = None
+        self.d_k = 64
+
+        self.init_weights()
+
+    def init_weights(self):
+        nn.init.xavier_uniform_(self.embedding_net[0].weight)
+        nn.init.xavier_uniform_(self.key_net.weight)
+        nn.init.xavier_uniform_(self.query_net.weight)
+        nn.init.xavier_uniform_(self.value_net.weight)
+        nn.init.xavier_uniform_(self.value_linear[0].weight)
+        nn.init.xavier_uniform_(self.value_linear[2].weight)
+        nn.init.xavier_uniform_(self.mlp[0].weight)
+        nn.init.xavier_uniform_(self.mlp[3].weight)
+        
+
+    def forward(self, state, actions):
+        # obtaining keys queries and values
+        state = self.feature_norm(state)
+        state_actions = torch.cat([state, actions], dim=-1).to(state.device)
+        state_action_embeddings = self.embedding_net(state_actions)
+        self.query = self.query_net(torch.sum(state_actions, dim=1, keepdim=True))
+        self.key = self.key_net(state_actions)
+        self.value = self.value_net(state_actions)
+
+        # self attention layer
+        attention_weights = F.softmax((self.query @ self.key.permute(0, 2, 1) / sqrt(self.d_k)), dim=-1)
+        attention_values =  (self.attention_weights @ self.value).squeeze(1)
+
+        attention_values_ = self.value_norm(attention_values + state_action_embeddings)
+        attention_values = self.value_linear(attention_values_)
+        attention_values = self.value_linear_norm(attention_values+attention_values_)
+
+        # MLP for predicting reward
+        y_hat = self.mlp(attention_values)
+        
+        return y_hat, attention_weights
+        
     
 class TransformerRewardPredictorNew(nn.Module):
     def __init__(self, e_dim, d_k, mlp_hidden_layers) -> None:
