@@ -94,69 +94,72 @@ class TransformerRewardPredictor(nn.Module):
         y_hat = self.mlp(self.attention_values)
         return y_hat, self.attention_weights
 
+def init(module, weight_init, bias_init, gain=1):
+	weight_init(module.weight.data, gain=gain)
+	if module.bias is not None:
+		bias_init(module.bias.data)
+	return module
+
+def init_(m, gain=0.01, activate=False):
+	if activate:
+		gain = nn.init.calculate_gain('relu')
+	return init(m, nn.init.orthogonal_, lambda x: nn.init.constant_(x, 0), gain=gain)
+
+
 class TransformerRewardPredictor_v2(nn.Module):
-    def __init__(self, obs_input_dim, action_dim, mlp_hidden_layers) -> None:
+    def __init__(self, obs_input_dim, num_heads) -> None:
         super(TransformerRewardPredictor, self).__init__()
-        self.feature_norm = nn.LayerNorm(obs_input_dim)
+        self.num_heads = num_heads
+        
         self.embedding_net = nn.Sequential(
-            nn.Linear(obs_input_dim+action_dim, 64),
-            nn.LayerNorm(64),
+            nn.LayerNorm(obs_input_dim)
+            init_(nn.Linear(obs_input_dim+action_dim, 64, bias=True), activate=True),
             nn.GELU(),
         )
-        self.key_net = nn.Linear(64, 64)
-        self.query_net = nn.Linear(64, 64)
-        self.value_net = nn.Linear(64, 64)
+        self.key_net = init_(nn.Linear(64, 64, bias=False))
+        self.query_net = nn.Sequential(
+            nn.LayerNorm(64),
+            init_(nn.Linear(64, 64, bias=False))
+        )
+        self.value_net = init_(nn.Linear(64, 64, bias=False))
 
         self.value_norm = nn.LayerNorm(64)
         self.value_linear = nn.Sequential(
-            nn.Linear(64, 1024),
+            init_(nn.Linear(64, 1024, bias=True), activate=True),
             nn.GELU(),
-            nn.Linear(1024, 64)
+            init_(nn.Linear(1024, 64, bias=True)),
         )
         self.value_linear_norm = nn.LayerNorm(64)
         self.mlp = nn.Sequential(
-            nn.Linear(64, 64),
-            nn.LayerNorm(64),
+            init_(nn.Linear(64, 64, bias=True), activate=True),
             nn.GELU(),
-            nn.Linear(64, 1)
+            init_(nn.Linear(64, 1)),
         )
         # self.attention_weights = None
-        self.d_k = 64
-
-        self.init_weights()
-
-    def init_weights(self):
-        nn.init.xavier_uniform_(self.embedding_net[0].weight)
-        nn.init.xavier_uniform_(self.key_net.weight)
-        nn.init.xavier_uniform_(self.query_net.weight)
-        nn.init.xavier_uniform_(self.value_net.weight)
-        nn.init.xavier_uniform_(self.value_linear[0].weight)
-        nn.init.xavier_uniform_(self.value_linear[2].weight)
-        nn.init.xavier_uniform_(self.mlp[0].weight)
-        nn.init.xavier_uniform_(self.mlp[3].weight)
+        self.d_k = 64//self.num_heads
         
 
-    def forward(self, state, actions):
+    def forward(self, state):
         # obtaining keys queries and values
-        state = self.feature_norm(state)
-        state_actions = torch.cat([state, actions], dim=-1).to(state.device)
-        state_action_embeddings = self.embedding_net(state_actions)
-        self.query = self.query_net(torch.sum(state_actions, dim=1, keepdim=True))
-        self.key = self.key_net(state_actions)
-        self.value = self.value_net(state_actions)
+        state_embeddings = self.embedding_net(state) # Batch, Trajectory Length, Embedding Dim
+        batch, trajectory_len, emd = state_embeddings.shape
+        assert emd//self.num_heads == 0
+        query = self.query_net(torch.sum(state_embeddings, dim=1, keepdim=True)).reshape(batch, 1, self.num_heads, emd//self.num_heads).permute(0, 3, 1, 2) # Batch, Num Heads, 1, Embedding Dim
+        key = self.key_net(state_embeddings).reshape(batch, trajectory_len, self.num_heads, emd//self.num_heads).permute(0, 3, 1, 2) # Batch, Num Heads, Trajectory Len, Embedding Dim
+        value = self.value_net(state_embeddings).reshape(batch, trajectory_len, self.num_heads, emd//self.num_heads).permute(0, 3, 1, 2) # Batch, Num Heads, Trajectory Len, Embedding Dim
 
         # self attention layer
-        attention_weights = F.softmax((self.query @ self.key.permute(0, 2, 1) / sqrt(self.d_k)), dim=-1)
-        attention_values =  (self.attention_weights @ self.value).squeeze(1)
+        attention_weights = F.softmax((query @ key.transpose(-1, -2) / sqrt(self.d_k)), dim=-1) # Batch, Num Heads, 1, Trajectory Len
+        attention_values =  (attention_weights @ value).squeeze(-2).view(batch, -1) # Batch, Embedding Dim
 
-        attention_values_ = self.value_norm(attention_values + state_action_embeddings)
+        attention_values_ = self.value_norm(attention_values + torch.mean(state_embeddings, dim=1))
         attention_values = self.value_linear(attention_values_)
         attention_values = self.value_linear_norm(attention_values+attention_values_)
 
         # MLP for predicting reward
-        y_hat = self.mlp(attention_values)
+        episodic_reward = self.mlp(attention_values)
         
-        return y_hat, attention_weights
+        return episodic_reward, attention_weights
         
     
 class TransformerRewardPredictorNew(nn.Module):
