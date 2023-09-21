@@ -113,25 +113,25 @@ class TransformerRewardPredictor_v2(nn.Module):
         
         self.embedding_net = nn.Sequential(
             nn.LayerNorm(obs_input_dim)
-            init_(nn.Linear(obs_input_dim+action_dim, 64, bias=True), activate=True),
+            init_(nn.Linear(obs_input_dim+action_dim, 64), activate=True),
             nn.GELU(),
         )
-        self.key_net = init_(nn.Linear(64, 64, bias=False))
+        self.key_net = init_(nn.Linear(64, 64))
         self.query_net = nn.Sequential(
             nn.LayerNorm(64),
-            init_(nn.Linear(64, 64, bias=False))
+            init_(nn.Linear(64, 64))
         )
-        self.value_net = init_(nn.Linear(64, 64, bias=False))
+        self.value_net = init_(nn.Linear(64, 64))
 
         self.value_norm = nn.LayerNorm(64)
         self.value_linear = nn.Sequential(
-            init_(nn.Linear(64, 1024, bias=True), activate=True),
+            init_(nn.Linear(64, 1024), activate=True),
             nn.GELU(),
-            init_(nn.Linear(1024, 64, bias=True)),
+            init_(nn.Linear(1024, 64)),
         )
         self.value_linear_norm = nn.LayerNorm(64)
         self.mlp = nn.Sequential(
-            init_(nn.Linear(64, 64, bias=True), activate=True),
+            init_(nn.Linear(64, 64), activate=True),
             nn.GELU(),
             init_(nn.Linear(64, 1)),
         )
