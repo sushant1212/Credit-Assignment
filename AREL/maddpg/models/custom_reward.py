@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from math import sqrt
 
 class MLP(nn.Module):
     """
@@ -91,3 +92,71 @@ class CustomTimeRewardNet(nn.Module):
 
         episode_reward = self.reward_mlp(mean_episode_embedding).squeeze(-1)
         return episode_reward, weights
+
+
+def init(module, weight_init, bias_init, gain=1):
+	weight_init(module.weight.data, gain=gain)
+	if module.bias is not None:
+		bias_init(module.bias.data)
+	return module
+
+def init_(m, gain=0.01, activate=False):
+	if activate:
+		gain = nn.init.calculate_gain('relu')
+	return init(m, nn.init.orthogonal_, lambda x: nn.init.constant_(x, 0), gain=gain)
+
+
+class TransformerRewardPredictor_v2(nn.Module):
+    def __init__(self, obs_input_dim, num_heads) -> None:
+        super(TransformerRewardPredictor_v2, self).__init__()
+        self.num_heads = num_heads
+        
+        self.embedding_net = nn.Sequential(
+            nn.LayerNorm(obs_input_dim),
+            init_(nn.Linear(obs_input_dim, 64), activate=True),
+            nn.GELU(),
+        )
+        self.key_net = init_(nn.Linear(64, 64))
+        self.query_net = nn.Sequential(
+            nn.LayerNorm(64),
+            init_(nn.Linear(64, 64))
+        )
+        self.value_net = init_(nn.Linear(64, 64))
+
+        self.value_norm = nn.LayerNorm(64)
+        self.value_linear = nn.Sequential(
+            init_(nn.Linear(64, 1024), activate=True),
+            nn.GELU(),
+            init_(nn.Linear(1024, 64)),
+        )
+        self.value_linear_norm = nn.LayerNorm(64)
+        self.mlp = nn.Sequential(
+            init_(nn.Linear(64, 64), activate=True),
+            nn.GELU(),
+            init_(nn.Linear(64, 1)),
+        )
+        # self.attention_weights = None
+        self.d_k = 64//self.num_heads
+        
+
+    def forward(self, state):
+        # obtaining keys queries and values
+        state_embeddings = self.embedding_net(state) # Batch, Trajectory Length, Embedding Dim
+        batch, trajectory_len, emd = state_embeddings.shape
+        assert emd % self.num_heads == 0
+        query = self.query_net(torch.sum(state_embeddings, dim=1, keepdim=True)).reshape(batch, 1, self.num_heads, emd//self.num_heads).permute(0, 2, 1, 3) # Batch, Num Heads, 1, Embedding Dim
+        key = self.key_net(state_embeddings).reshape(batch, trajectory_len, self.num_heads, emd//self.num_heads).permute(0, 2, 1, 3) # Batch, Num Heads, Trajectory Len, Embedding Dim
+        value = self.value_net(state_embeddings).reshape(batch, trajectory_len, self.num_heads, emd//self.num_heads).permute(0, 2, 1, 3) # Batch, Num Heads, Trajectory Len, Embedding Dim
+
+        # self attention layer
+        attention_weights = F.softmax((query @ key.transpose(-1, -2) / sqrt(self.d_k)), dim=-1) # Batch, Num Heads, 1, Trajectory Len
+        attention_values =  (attention_weights @ value).squeeze(-2).view(batch, -1) # Batch, Embedding Dim
+
+        attention_values_ = self.value_norm(attention_values + torch.mean(state_embeddings, dim=1))
+        attention_values = self.value_linear(attention_values_)
+        attention_values = self.value_linear_norm(attention_values+attention_values_)
+
+        # MLP for predicting reward
+        episodic_reward = self.mlp(attention_values)
+        
+        return episodic_reward, attention_weights

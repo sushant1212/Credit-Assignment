@@ -108,12 +108,12 @@ def init_(m, gain=0.01, activate=False):
 
 class TransformerRewardPredictor_v2(nn.Module):
     def __init__(self, obs_input_dim, num_heads) -> None:
-        super(TransformerRewardPredictor, self).__init__()
+        super(TransformerRewardPredictor_v2, self).__init__()
         self.num_heads = num_heads
         
         self.embedding_net = nn.Sequential(
-            nn.LayerNorm(obs_input_dim)
-            init_(nn.Linear(obs_input_dim+action_dim, 64), activate=True),
+            nn.LayerNorm(obs_input_dim),
+            init_(nn.Linear(obs_input_dim, 64), activate=True),
             nn.GELU(),
         )
         self.key_net = init_(nn.Linear(64, 64))
@@ -143,10 +143,10 @@ class TransformerRewardPredictor_v2(nn.Module):
         # obtaining keys queries and values
         state_embeddings = self.embedding_net(state) # Batch, Trajectory Length, Embedding Dim
         batch, trajectory_len, emd = state_embeddings.shape
-        assert emd//self.num_heads == 0
-        query = self.query_net(torch.sum(state_embeddings, dim=1, keepdim=True)).reshape(batch, 1, self.num_heads, emd//self.num_heads).permute(0, 3, 1, 2) # Batch, Num Heads, 1, Embedding Dim
-        key = self.key_net(state_embeddings).reshape(batch, trajectory_len, self.num_heads, emd//self.num_heads).permute(0, 3, 1, 2) # Batch, Num Heads, Trajectory Len, Embedding Dim
-        value = self.value_net(state_embeddings).reshape(batch, trajectory_len, self.num_heads, emd//self.num_heads).permute(0, 3, 1, 2) # Batch, Num Heads, Trajectory Len, Embedding Dim
+        assert emd % self.num_heads == 0
+        query = self.query_net(torch.sum(state_embeddings, dim=1, keepdim=True)).reshape(batch, 1, self.num_heads, emd//self.num_heads).permute(0, 2, 1, 3) # Batch, Num Heads, 1, Embedding Dim
+        key = self.key_net(state_embeddings).reshape(batch, trajectory_len, self.num_heads, emd//self.num_heads).permute(0, 2, 1, 3) # Batch, Num Heads, Trajectory Len, Embedding Dim
+        value = self.value_net(state_embeddings).reshape(batch, trajectory_len, self.num_heads, emd//self.num_heads).permute(0, 2, 1, 3) # Batch, Num Heads, Trajectory Len, Embedding Dim
 
         # self attention layer
         attention_weights = F.softmax((query @ key.transpose(-1, -2) / sqrt(self.d_k)), dim=-1) # Batch, Num Heads, 1, Trajectory Len
