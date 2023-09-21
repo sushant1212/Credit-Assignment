@@ -380,7 +380,7 @@ for i_episode in range(args.num_episodes):
         epoch_train_step_reward_loss = []
         epoch_train_reg_loss = []
         for ii in range(1000):
-            x_batch, y_batch, z_batch = sample_trajectory(memory_e.memory, n_trajectories=8)
+            x_batch, y_batch, z_batch = sample_trajectory(memory_e.memory, n_trajectories=256)
             x_batch = x_batch.to(device)
             y_batch = y_batch.to(device)
             z_batch = z_batch.to(device)
