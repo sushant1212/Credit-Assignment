@@ -107,8 +107,8 @@ parser.add_argument('--target_update_mode', default='soft', help='soft | hard | 
 parser.add_argument('--cuda', default=False, action='store_true')
 parser.add_argument("--gpu_id", default="0", type=str, required=False)
 parser.add_argument('--eval_freq', type=int, default=1000)
-parser.add_argument("--use_true_reward", type=bool, default=True)
-parser.add_argument("--use_variance_loss", type=bool, default=False)
+parser.add_argument("--use_true_reward", default=False, action="store_true")
+parser.add_argument("--use_variance_loss", default=False, action="store_true")
 args = parser.parse_args()
 if args.exp_name is None:
     args.exp_name = args.scenario + '_' + args.critic_type + '_' + args.target_update_mode + '_hiddensize' \
@@ -224,6 +224,11 @@ def sample_and_pred(memory, model:CustomTimeRewardNet, batch_size, n_agents, n_t
     predicted_ep_reward, attention_weights = model(x_train_tensor.to(device))
 
     attention_weights = torch.mean(attention_weights.squeeze(), dim=1)
+    if args.use_true_reward:
+        y_time_hat = attention_weights * (reward_tensor.to(device))
+    else:
+        y_time_hat = attention_weights * predicted_ep_reward.to(device)
+
     y_time_hat = attention_weights * (reward_tensor.to(device) if args.use_true_reward else predicted_ep_reward.to(device))
     pred_rewards = np.repeat(y_time_hat.detach().cpu().numpy()[:,:,np.newaxis], n_agents, axis=2)
 
@@ -283,12 +288,15 @@ def make_train_step(model, loss_fn, optimizer):
         # Makes predictions
         yhat, attention_weights = model(x)
         attention_weights = torch.mean(attention_weights.squeeze(), dim=1)
-        y_time_hat = attention_weights * (z.to(device) if args.use_true_reward else yhat.to(device))        
+        if args.use_true_reward:
+            y_time_hat = attention_weights * (z.to(device))
+        else:
+            y_time_hat = attention_weights * yhat.to(device)
 
         # Computes loss
         loss = loss_fn(y, yhat)
         loss_2 = loss_fn(z, y_time_hat)
-        loss_3 = (20 * torch.mean(torch.var(y_time_hat, dim=1)) ) if args.use_variance_loss else 0.0
+        loss_3 = (20 * torch.mean(torch.var(y_time_hat, dim=1)) ) if args.use_variance_loss else torch.tensor(0.0).to(device)
         
         if args.use_variance_loss:
             loss_total = loss + loss_3
