@@ -400,7 +400,7 @@ for i_episode in range(args.num_episodes):
         epoch_train_episode_reward_loss = []
         epoch_train_step_reward_loss = []
         epoch_train_reg_loss = []
-        for ii in tqdm(range(1000)):
+        for ii in range(1000):
             x_batch, y_batch, z_batch = sample_trajectory(memory_e.memory, n_trajectories=256)
             x_batch = x_batch.to(device)
             y_batch = y_batch.to(device)
