@@ -214,3 +214,57 @@ class TransformerRewardPredictor_v3(nn.Module):
         # pass through time transformer
         ep_reward, attn_weights = self.time_transformer(attention_values)
         return ep_reward, attn_weights 
+
+class TransformerRewardPredictor_v4(nn.Module):
+    def __init__(self, n_agents, obs_input_dim, num_heads) -> None:
+        super(TransformerRewardPredictor_v4, self).__init__()
+        self.num_heads = num_heads
+        self.n_agents = n_agents
+        self.embedding_net = nn.Sequential(
+            nn.LayerNorm(obs_input_dim),
+            init_(nn.Linear(obs_input_dim, 64), activate=True),
+            nn.GELU(),
+        )
+        self.key_net = init_(nn.Linear(64, 64))
+        self.query_net = nn.Sequential(
+            nn.LayerNorm(64),
+            init_(nn.Linear(64, 64))
+        )
+        self.value_norm = nn.LayerNorm(64)
+        self.value_net = init_(nn.Linear(64, 64))
+        self.value_linear = nn.Sequential(
+            init_(nn.Linear(64, 1024), activate=True),
+            nn.GELU(),
+            init_(nn.Linear(1024, 64)),
+        )
+        self.value_linear_norm = nn.LayerNorm(64)
+        self.time_transformer = TransformerRewardPredictor_v2(64, num_heads)
+        self.d_k = 64//self.num_heads
+
+    def forward(self, states):
+        batch_size, num_steps, n_agents, obs_dim = states.shape
+        assert n_agents == self.n_agents
+        state_embeddings = self.embedding_net(states)  # (batch, num_steps, n_agents, emd)
+        emb = state_embeddings.shape[-1]
+        assert emb % self.num_heads == 0
+
+        query = self.query_net(torch.sum(state_embeddings, dim=2, keepdim=True)).reshape(batch_size, num_steps, 1, self.num_heads, emb//self.num_heads).permute(0, 1, 3, 2, 4) # Batch, num steps, Num Heads, 1, Embedding Dim
+        assert query.shape == (batch_size, num_steps, self.num_heads, 1, emb//self.num_heads)
+        key = self.key_net(state_embeddings).reshape(batch_size, num_steps, n_agents, self.num_heads, emb//self.num_heads).permute(0, 1, 3, 2, 4) # Batch, Num Heads, num_steps, n_agents, emb
+        assert key.shape == (batch_size, num_steps, self.num_heads, n_agents, emb//self.num_heads)
+        value = self.value_net(state_embeddings).reshape(batch_size, num_steps, n_agents, self.num_heads, emb//self.num_heads).permute(0, 1, 3, 2, 4) # Batch, Num Heads, num_steps, n_agents, emb
+        assert value.shape == (batch_size, num_steps, self.num_heads, n_agents, emb//self.num_heads)
+
+        # self attention layer
+        agent_attention_weights = F.softmax((query @ key.transpose(-1, -2) / sqrt(self.d_k)), dim=-1) # Batch, num_steps, Num Heads, 1, n_agents
+        assert agent_attention_weights.shape == (batch_size, num_steps, self.num_heads, 1, n_agents)
+        attention_values =  (agent_attention_weights @ value).squeeze(-2).view(batch_size, num_steps, -1) # Batch, num_steps, 64
+        assert attention_values.shape == (batch_size, num_steps, emb)
+
+        attention_values_ = self.value_norm(attention_values + torch.mean(state_embeddings, dim=2))
+        attention_values = self.value_linear(attention_values_)
+        attention_values = self.value_linear_norm(attention_values+attention_values_)
+
+        # pass through time transformer
+        ep_reward, temporal_attention_weights = self.time_transformer(attention_values)
+        return ep_reward, temporal_attention_weights, agent_attention_weights
