@@ -335,6 +335,10 @@ for i_episode in range(args.num_episodes):
     episode_step = 0
     agents_rew = [[] for _ in range(n_agents)]
     x_e, action_e, mask_e, x_next_e, reward_e = [], [], [], [], []
+    policy_losses = []
+    policy_grad_norms = []
+    value_losses = []
+    value_grad_norms = []
     while True:
         # action_n_1 = [agent.select_action(torch.Tensor([obs]).to(device), action_noise=True, param_noise=False).squeeze().cpu().numpy() for obs in obs_n]
         action_n = agent.select_action(torch.Tensor(obs_n).to(device), action_noise=True,
@@ -370,22 +374,26 @@ for i_episode in range(args.num_episodes):
                     batch = sample_and_pred(memory_e.memory, reward_model, 
                                     args.batch_size, n_agents, n_trajectories=256)
                     
-                    policy_loss = agent.update_actor_parameters(batch, i, args.shuffle)
+                    policy_loss, policy_grad_norm = agent.update_actor_parameters(batch, i, args.shuffle)
+                    policy_losses.append(policy_loss)
+                    policy_grad_norms.append(policy_grad_norm.item())
                     updates += 1
                 print('episode {}, p loss {}, p_lr {}'.
                       format(i_episode, policy_loss, agent.actor_lr))
             if total_numsteps % args.steps_per_critic_update == 0:
-                value_losses = []
+                temp_value_losses = []
                 for _ in range(args.critic_updates_per_step):
                     
                     batch = sample_and_pred(memory_e.memory, reward_model, 
                                     args.batch_size, n_agents, n_trajectories=256)
-                    
-                    value_losses.append(agent.update_critic_parameters(batch, i, args.shuffle)[0])
+                    value_loss, _, value_grad_norm = agent.update_critic_parameters(batch, i, args.shuffle)
+                    value_losses.append(value_loss)
+                    value_grad_norms.append(value_grad_norm.item())
+                    temp_value_losses.append(value_loss)
                     updates += 1
-                value_loss = np.mean(value_losses)
+                v_loss = np.mean(temp_value_losses)
                 print('episode {}, q loss {},  q_lr {}'.
-                      format(i_episode, value_loss, agent.critic_optim.param_groups[0]['lr']))
+                      format(i_episode, v_loss, agent.critic_optim.param_groups[0]['lr']))
                 if args.target_update_mode == 'episodic':
                     hard_update(agent.critic_target, agent.critic)
 
@@ -420,6 +428,10 @@ for i_episode in range(args.num_episodes):
     if not args.fixed_lr:
         agent.adjust_lr(i_episode)
     writer.add_scalar(args.exp_name + f'_episode_reward', episode_reward, i_episode)
+    writer.add_scalar(args.exp_name + f"policy_loss", np.mean(policy_losses), i_episode)
+    writer.add_scalar(args.exp_name + f"policy_grad_norm", np.mean(policy_grad_norms), i_episode)
+    writer.add_scalar(args.exp_name + f"value_loss", np.mean(value_losses), i_episode)
+    writer.add_scalar(args.exp_name + f"value_grad_norm", np.mean(value_grad_norms), i_episode)
     rewards.append(episode_reward)
     if (i_episode + 1) % args.eval_freq == 0:
         tr_log = {'num_adversary': 0,

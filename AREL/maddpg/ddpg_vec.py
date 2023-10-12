@@ -113,11 +113,11 @@ class Critic(nn.Module):
             self.net = self.net_fn(sa_dim, num_agents, hidden_size, group)
 
     def forward(self, inputs, actions):
-        bz = inputs.size()[0]
-        s_n = inputs.view(bz, self.num_agents, -1)
-        a_n = actions.view(bz, self.num_agents, -1)
-        x = torch.cat((s_n, a_n), dim=2)
-        V = self.net(x)
+        bz = inputs.size()[0]  # bz = batch
+        s_n = inputs.view(bz, self.num_agents, -1)  # s_n.shape = (batch, n_agents, 26)
+        a_n = actions.view(bz, self.num_agents, -1)  # a_n.shape = (batch, n_agents, n_action)
+        x = torch.cat((s_n, a_n), dim=2)  # x forms state-action tensor
+        V = self.net(x)  # V.shape = (batch, 1)
         return V
 
 
@@ -220,11 +220,12 @@ class DDPG(object):
         # reward_batch = Variable(torch.cat(batch.reward)).to(self.device)
         # mask_batch = Variable(torch.cat(batch.mask)).to(self.device)
         # next_state_batch = torch.cat(batch.next_state).to(self.device)
-        state_batch = Variable(torch.Tensor(batch.state)).to(self.device)
-        action_batch = Variable(torch.Tensor(batch.action)).to(self.device)
-        reward_batch = Variable(torch.Tensor(batch.reward)).to(self.device)
-        mask_batch = Variable(torch.Tensor(batch.mask)).to(self.device)
-        next_state_batch = torch.Tensor(batch.next_state).to(self.device)
+        state_batch = Variable(torch.Tensor(batch.state)).to(self.device)  # (batch, n_agents*obs_dim)
+        action_batch = Variable(torch.Tensor(batch.action)).to(self.device) # (batch, n_agents*action_dim)
+        reward_batch = Variable(torch.Tensor(batch.reward)).to(self.device)  # (batch, n_agents)
+        mask_batch = Variable(torch.Tensor(batch.mask)).to(self.device)  # (batch, n_agents)
+        next_state_batch = torch.Tensor(batch.next_state).to(self.device)  # (batch, n_agents*obs_dim)
+
         if shuffle == 'shuffle':
             rand_idx = np.random.permutation(self.n_agent)
             new_state_batch = state_batch.view(-1, self.n_agent, self.obs_dim)
@@ -261,7 +262,7 @@ class DDPG(object):
 
     def update_actor_parameters(self, batch, agent_id, shuffle=None):
         # state_batch = Variable(torch.cat(batch.state)).to(self.device)
-        state_batch = Variable(torch.Tensor(batch.state)).to(self.device)
+        state_batch = Variable(torch.Tensor(batch.state)).to(self.device) # batch, 156
         if shuffle == 'shuffle':
             rand_idx = np.random.permutation(self.n_agent)
             new_state_batch = state_batch.view(-1, self.n_agent, self.obs_dim)
@@ -269,21 +270,21 @@ class DDPG(object):
 
         self.actor_optim.zero_grad()
         action_batch_n, logit = self.select_action(
-            state_batch.view(-1, self.obs_dim), action_noise=self.train_noise, grad=True)
-        action_batch_n = action_batch_n.view(-1, self.n_action * self.n_agent)
+            state_batch.view(-1, self.obs_dim), action_noise=self.train_noise, grad=True)  # input: (batch * n_agents, 26); outputs: (batch * n_agents, act_dim)
+        action_batch_n = action_batch_n.view(-1, self.n_action * self.n_agent)  # action_batch_n.shape = (batch, n_agent * n_action)
 
 
         policy_loss = -self.critic(state_batch, action_batch_n)
         policy_loss = policy_loss.mean() + 1e-3 * (logit ** 2).mean()
         policy_loss.backward()
         #clip_grad_norm_(self.actor.parameters(), 0.00000001)
-        clip_grad_norm_(self.actor_params, 0.5)
+        grad_norm = clip_grad_norm_(self.actor_params, 0.5)
         self.actor_optim.step()
 
         soft_update(self.actor_target, self.actor, self.tau)
         soft_update(self.critic_target, self.critic, self.tau)
 
-        return policy_loss.item()
+        return policy_loss.item(), grad_norm
 
 
     def perturb_actor_parameters(self, param_noise):
