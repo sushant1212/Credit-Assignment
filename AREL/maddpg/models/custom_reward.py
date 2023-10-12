@@ -107,7 +107,7 @@ def init_(m, gain=0.01, activate=False):
 
 
 class TransformerRewardPredictor_v2(nn.Module):
-    def __init__(self, obs_input_dim, num_heads) -> None:
+    def __init__(self, obs_input_dim, num_heads, query_reduction="sum") -> None:
         super(TransformerRewardPredictor_v2, self).__init__()
         self.num_heads = num_heads
         
@@ -115,10 +115,10 @@ class TransformerRewardPredictor_v2(nn.Module):
             nn.LayerNorm(obs_input_dim),
             init_(nn.Linear(obs_input_dim, 64), activate=True),
             nn.GELU(),
+            nn.LayerNorm(64),
         )
         self.key_net = init_(nn.Linear(64, 64))
         self.query_net = nn.Sequential(
-            nn.LayerNorm(64),
             init_(nn.Linear(64, 64))
         )
         self.value_net = init_(nn.Linear(64, 64))
@@ -137,14 +137,18 @@ class TransformerRewardPredictor_v2(nn.Module):
         )
         # self.attention_weights = None
         self.d_k = 64//self.num_heads
-        
+        self.query_reduction = query_reduction
+        assert(self.query_reduction == "sum" or self.query_reduction == "mean")
 
     def forward(self, state):
         # obtaining keys queries and values
         state_embeddings = self.embedding_net(state) # Batch, Trajectory Length, Embedding Dim
         batch, trajectory_len, emd = state_embeddings.shape
         assert emd % self.num_heads == 0
-        query = self.query_net(torch.sum(state_embeddings, dim=1, keepdim=True)).reshape(batch, 1, self.num_heads, emd//self.num_heads).permute(0, 2, 1, 3) # Batch, Num Heads, 1, Embedding Dim
+        if self.query_reduction == "sum":
+            query = self.query_net(torch.sum(state_embeddings, dim=1, keepdim=True)).reshape(batch, 1, self.num_heads, emd//self.num_heads).permute(0, 2, 1, 3) # Batch, Num Heads, 1, Embedding Dim
+        elif self.query_reduction == "mean":
+            query = self.query_net(torch.mean(state_embeddings, dim=1, keepdim=True)).reshape(batch, 1, self.num_heads, emd//self.num_heads).permute(0, 2, 1, 3) # Batch, Num Heads, 1, Embedding Dim
         key = self.key_net(state_embeddings).reshape(batch, trajectory_len, self.num_heads, emd//self.num_heads).permute(0, 2, 1, 3) # Batch, Num Heads, Trajectory Len, Embedding Dim
         value = self.value_net(state_embeddings).reshape(batch, trajectory_len, self.num_heads, emd//self.num_heads).permute(0, 2, 1, 3) # Batch, Num Heads, Trajectory Len, Embedding Dim
 
@@ -162,7 +166,7 @@ class TransformerRewardPredictor_v2(nn.Module):
         return episodic_reward, attention_weights
     
 class TransformerRewardPredictor_v3(nn.Module):
-    def __init__(self, n_agents, obs_input_dim, num_heads) -> None:
+    def __init__(self, n_agents, obs_input_dim, num_heads, query_reduction="sum") -> None:
         super(TransformerRewardPredictor_v3, self).__init__()
         self.num_heads = num_heads
         self.n_agents = n_agents
@@ -184,8 +188,10 @@ class TransformerRewardPredictor_v3(nn.Module):
             init_(nn.Linear(1024, 64)),
         )
         self.value_linear_norm = nn.LayerNorm(64)
-        self.time_transformer = TransformerRewardPredictor_v2(64, num_heads)
+        self.time_transformer = TransformerRewardPredictor_v2(64, num_heads, query_reduction=query_reduction)
         self.d_k = 64//self.num_heads
+        self.query_reduction = query_reduction
+        assert(self.query_reduction == "sum" or self.query_reduction == "mean")
 
     def forward(self, states):
         batch_size, num_steps, n_agents, obs_dim = states.shape
@@ -194,7 +200,11 @@ class TransformerRewardPredictor_v3(nn.Module):
         emb = state_embeddings.shape[-1]
         assert emb % self.num_heads == 0
 
-        query = self.query_net(torch.sum(state_embeddings, dim=2, keepdim=True)).reshape(batch_size, num_steps, 1, self.num_heads, emb//self.num_heads).permute(0, 1, 3, 2, 4) # Batch, num steps, Num Heads, 1, Embedding Dim
+        if self.query_reduction == "sum":
+            query = self.query_net(torch.sum(state_embeddings, dim=2, keepdim=True)).reshape(batch_size, num_steps, 1, self.num_heads, emb//self.num_heads).permute(0, 1, 3, 2, 4) # Batch, num steps, Num Heads, 1, Embedding Dim
+        elif self.query_reduction == "mean":
+            query = self.query_net(torch.mean(state_embeddings, dim=2, keepdim=True)).reshape(batch_size, num_steps, 1, self.num_heads, emb//self.num_heads).permute(0, 1, 3, 2, 4) # Batch, num steps, Num Heads, 1, Embedding Dim
+
         assert query.shape == (batch_size, num_steps, self.num_heads, 1, emb//self.num_heads)
         key = self.key_net(state_embeddings).reshape(batch_size, num_steps, n_agents, self.num_heads, emb//self.num_heads).permute(0, 1, 3, 2, 4) # Batch, Num Heads, num_steps, n_agents, emb
         assert key.shape == (batch_size, num_steps, self.num_heads, n_agents, emb//self.num_heads)
@@ -216,7 +226,7 @@ class TransformerRewardPredictor_v3(nn.Module):
         return ep_reward, attn_weights 
 
 class TransformerRewardPredictor_v4(nn.Module):
-    def __init__(self, n_agents, obs_input_dim, num_heads) -> None:
+    def __init__(self, n_agents, obs_input_dim, num_heads, query_reduction="sum") -> None:
         super(TransformerRewardPredictor_v4, self).__init__()
         self.num_heads = num_heads
         self.n_agents = n_agents
@@ -224,10 +234,10 @@ class TransformerRewardPredictor_v4(nn.Module):
             nn.LayerNorm(obs_input_dim),
             init_(nn.Linear(obs_input_dim, 64), activate=True),
             nn.GELU(),
+            nn.LayerNorm(64),
         )
         self.key_net = init_(nn.Linear(64, 64))
         self.query_net = nn.Sequential(
-            nn.LayerNorm(64),
             init_(nn.Linear(64, 64))
         )
         self.value_norm = nn.LayerNorm(64)
@@ -238,8 +248,10 @@ class TransformerRewardPredictor_v4(nn.Module):
             init_(nn.Linear(1024, 64)),
         )
         self.value_linear_norm = nn.LayerNorm(64)
-        self.time_transformer = TransformerRewardPredictor_v2(64, num_heads)
+        self.time_transformer = TransformerRewardPredictor_v2(64, num_heads, query_reduction=query_reduction)
         self.d_k = 64//self.num_heads
+        self.query_reduction = query_reduction
+        assert(self.query_reduction == "sum" or self.query_reduction == "mean")
 
     def forward(self, states):
         batch_size, num_steps, n_agents, obs_dim = states.shape
@@ -248,7 +260,11 @@ class TransformerRewardPredictor_v4(nn.Module):
         emb = state_embeddings.shape[-1]
         assert emb % self.num_heads == 0
 
-        query = self.query_net(torch.sum(state_embeddings, dim=2, keepdim=True)).reshape(batch_size, num_steps, 1, self.num_heads, emb//self.num_heads).permute(0, 1, 3, 2, 4) # Batch, num steps, Num Heads, 1, Embedding Dim
+        if self.query_reduction == "sum":
+            query = self.query_net(torch.sum(state_embeddings, dim=2, keepdim=True)).reshape(batch_size, num_steps, 1, self.num_heads, emb//self.num_heads).permute(0, 1, 3, 2, 4) # Batch, num steps, Num Heads, 1, Embedding Dim
+        elif self.query_reduction == "mean":
+            query = self.query_net(torch.mean(state_embeddings, dim=2, keepdim=True)).reshape(batch_size, num_steps, 1, self.num_heads, emb//self.num_heads).permute(0, 1, 3, 2, 4) # Batch, num steps, Num Heads, 1, Embedding Dim
+
         assert query.shape == (batch_size, num_steps, self.num_heads, 1, emb//self.num_heads)
         key = self.key_net(state_embeddings).reshape(batch_size, num_steps, n_agents, self.num_heads, emb//self.num_heads).permute(0, 1, 3, 2, 4) # Batch, Num Heads, num_steps, n_agents, emb
         assert key.shape == (batch_size, num_steps, self.num_heads, n_agents, emb//self.num_heads)

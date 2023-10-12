@@ -109,6 +109,7 @@ parser.add_argument("--gpu_id", default="0", type=str, required=False)
 parser.add_argument('--eval_freq', type=int, default=1000)
 parser.add_argument("--use_true_reward", default=False, action="store_true")
 parser.add_argument("--use_variance_loss", default=False, action="store_true")
+parser.add_argument("--query_reduction", default="sum", type=str, required=False)
 args = parser.parse_args()
 if args.exp_name is None:
     args.exp_name = args.scenario + '_' + args.critic_type + '_' + args.target_update_mode + '_hiddensize' \
@@ -266,7 +267,8 @@ depth = 3
 
 reward_model = TransformerRewardPredictor_v2 (
     obs_input_dim=(env.observation_space[0].shape[0]-(n_agents-1)*2) * n_agents,
-    num_heads=4
+    num_heads=4,
+    query_reduction=args.query_reduction
 )
 
 # if torch.cuda.device_count() > 1:
