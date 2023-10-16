@@ -423,10 +423,14 @@ for i_episode in range(args.num_episodes):
     if not args.fixed_lr:
         agent.adjust_lr(i_episode)
     writer.add_scalar(args.exp_name + f'_episode_reward', episode_reward, i_episode)
-    writer.add_scalar(args.exp_name + f"policy_loss", np.mean(policy_losses), i_episode)
-    writer.add_scalar(args.exp_name + f"policy_grad_norm", np.mean(policy_grad_norms), i_episode)
-    writer.add_scalar(args.exp_name + f"value_loss", np.mean(value_losses), i_episode)
-    writer.add_scalar(args.exp_name + f"value_grad_norm", np.mean(value_grad_norms), i_episode)
+    if len(policy_losses) != 0:
+        writer.add_scalar(args.exp_name + f"policy_loss", np.mean(policy_losses), i_episode)
+    if len(policy_grad_norms) != 0:
+        writer.add_scalar(args.exp_name + f"policy_grad_norm", np.mean(policy_grad_norms), i_episode)
+    if len(value_losses) != 0:
+        writer.add_scalar(args.exp_name + f"value_loss", np.mean(value_losses), i_episode)
+    if len(value_grad_norms) != 0:
+        writer.add_scalar(args.exp_name + f"value_grad_norm", np.mean(value_grad_norms), i_episode)
     rewards.append(episode_reward)
     if (i_episode + 1) % args.eval_freq == 0:
         tr_log = {'num_adversary': 0,
