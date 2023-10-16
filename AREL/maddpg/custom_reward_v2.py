@@ -370,7 +370,7 @@ for i_episode in range(args.num_episodes):
                 for _ in range(args.updates_per_step):
                     
                     batch = sample_and_pred(memory_e.memory, reward_model, 
-                                    args.batch_size, n_agents, n_trajectories=4)
+                                    args.batch_size, n_agents, n_trajectories=256)
                     
                     policy_loss, policy_grad_norm = agent.update_actor_parameters(batch, i, args.shuffle)
                     policy_losses.append(policy_loss)
@@ -383,7 +383,7 @@ for i_episode in range(args.num_episodes):
                 for _ in range(args.critic_updates_per_step):
                     
                     batch = sample_and_pred(memory_e.memory, reward_model, 
-                                    args.batch_size, n_agents, n_trajectories=4)
+                                    args.batch_size, n_agents, n_trajectories=256)
                     value_loss, _, value_grad_norm = agent.update_critic_parameters(batch, i, args.shuffle)
                     value_losses.append(value_loss)
                     value_grad_norms.append(value_grad_norm.item())
@@ -405,12 +405,12 @@ for i_episode in range(args.num_episodes):
     ################################################
     # train the reward redistribution model
         
-    if (i_episode+1) % 50 == 0 and (len(memory_e)>100):
+    if (i_episode+1) % 1000 == 0 and (len(memory_e)>4000):
         epoch_train_episode_reward_loss = []
         epoch_train_step_reward_loss = []
         epoch_train_reg_loss = []
-        for ii in tqdm(range(16)):
-            x_batch, y_batch, z_batch = sample_trajectory(memory_e.memory, n_trajectories=4)
+        for ii in range(1000):
+            x_batch, y_batch, z_batch = sample_trajectory(memory_e.memory, n_trajectories=256)
             x_batch = x_batch.to(device)
             y_batch = y_batch.to(device)
             z_batch = z_batch.to(device)
