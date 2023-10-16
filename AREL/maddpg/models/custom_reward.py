@@ -3,6 +3,25 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from math import sqrt
+import math
+
+def positionalencoding1d(d_model, length):
+    """
+    :param d_model: dimension of the model
+    :param length: length of positions
+    :return: length*d_model position matrix
+    """
+    if d_model % 2 != 0:
+        raise ValueError("Cannot use sin/cos positional encoding with "
+                         "odd dim (got dim={:d})".format(d_model))
+    pe = torch.zeros(length, d_model)
+    position = torch.arange(0, length).unsqueeze(1)
+    div_term = torch.exp((torch.arange(0, d_model, 2, dtype=torch.float) *
+                         -(math.log(10000.0) / d_model)))
+    pe[:, 0::2] = torch.sin(position.float() * div_term)
+    pe[:, 1::2] = torch.cos(position.float() * div_term)
+
+    return pe
 
 class MLP(nn.Module):
     """
@@ -107,7 +126,7 @@ def init_(m, gain=0.01, activate=False):
 
 
 class TransformerRewardPredictor_v2(nn.Module):
-    def __init__(self, obs_input_dim, num_heads, query_reduction="sum") -> None:
+    def __init__(self, obs_input_dim, num_heads, query_reduction="sum", add_pe=False, device=None) -> None:
         super(TransformerRewardPredictor_v2, self).__init__()
         self.num_heads = num_heads
         
@@ -139,11 +158,19 @@ class TransformerRewardPredictor_v2(nn.Module):
         self.d_k = 64//self.num_heads
         self.query_reduction = query_reduction
         assert(self.query_reduction == "sum" or self.query_reduction == "mean")
+        self.add_pe = add_pe
+        self.device = device
 
     def forward(self, state):
         # obtaining keys queries and values
         state_embeddings = self.embedding_net(state) # Batch, Trajectory Length, Embedding Dim
         batch, trajectory_len, emd = state_embeddings.shape
+        if self.add_pe:
+            assert self.device is not None
+            positional_embeddings = positionalencoding1d(emd, trajectory_len)
+            positional_embeddings = positional_embeddings.to(self.device)
+            state_embeddings += positional_embeddings
+
         assert emd % self.num_heads == 0
         if self.query_reduction == "sum":
             query = self.query_net(torch.sum(state_embeddings, dim=1, keepdim=True)).reshape(batch, 1, self.num_heads, emd//self.num_heads).permute(0, 2, 1, 3) # Batch, Num Heads, 1, Embedding Dim
@@ -166,7 +193,7 @@ class TransformerRewardPredictor_v2(nn.Module):
         return episodic_reward, attention_weights
     
 class TransformerRewardPredictor_v3(nn.Module):
-    def __init__(self, n_agents, obs_input_dim, num_heads, query_reduction="sum") -> None:
+    def __init__(self, n_agents, obs_input_dim, num_heads, query_reduction="sum", add_pe=False, device=None) -> None:
         super(TransformerRewardPredictor_v3, self).__init__()
         self.num_heads = num_heads
         self.n_agents = n_agents
@@ -188,10 +215,12 @@ class TransformerRewardPredictor_v3(nn.Module):
             init_(nn.Linear(1024, 64)),
         )
         self.value_linear_norm = nn.LayerNorm(64)
-        self.time_transformer = TransformerRewardPredictor_v2(64, num_heads, query_reduction=query_reduction)
+        self.time_transformer = TransformerRewardPredictor_v2(64, num_heads, query_reduction=query_reduction, add_pe=False, device=device)
         self.d_k = 64//self.num_heads
         self.query_reduction = query_reduction
         assert(self.query_reduction == "sum" or self.query_reduction == "mean")
+        self.add_pe = add_pe
+        self.device = device
 
     def forward(self, states):
         batch_size, num_steps, n_agents, obs_dim = states.shape
@@ -199,6 +228,11 @@ class TransformerRewardPredictor_v3(nn.Module):
         state_embeddings = self.embedding_net(states)  # (batch, num_steps, n_agents, emd)
         emb = state_embeddings.shape[-1]
         assert emb % self.num_heads == 0
+        if self.add_pe:
+            assert self.device is not None
+            positional_embeddings = positionalencoding1d(emb, n_agents)
+            positional_embeddings = positional_embeddings.to(self.device)
+            state_embeddings += positional_embeddings
 
         if self.query_reduction == "sum":
             query = self.query_net(torch.sum(state_embeddings, dim=2, keepdim=True)).reshape(batch_size, num_steps, 1, self.num_heads, emb//self.num_heads).permute(0, 1, 3, 2, 4) # Batch, num steps, Num Heads, 1, Embedding Dim
@@ -226,7 +260,7 @@ class TransformerRewardPredictor_v3(nn.Module):
         return ep_reward, attn_weights 
 
 class TransformerRewardPredictor_v4(nn.Module):
-    def __init__(self, n_agents, obs_input_dim, num_heads, query_reduction="sum") -> None:
+    def __init__(self, n_agents, obs_input_dim, num_heads, query_reduction="sum", add_pe=False, device=None) -> None:
         super(TransformerRewardPredictor_v4, self).__init__()
         self.num_heads = num_heads
         self.n_agents = n_agents
@@ -248,16 +282,24 @@ class TransformerRewardPredictor_v4(nn.Module):
             init_(nn.Linear(1024, 64)),
         )
         self.value_linear_norm = nn.LayerNorm(64)
-        self.time_transformer = TransformerRewardPredictor_v2(64, num_heads, query_reduction=query_reduction)
+        self.time_transformer = TransformerRewardPredictor_v2(64, num_heads, query_reduction=query_reduction, add_pe=False, device=device)
         self.d_k = 64//self.num_heads
         self.query_reduction = query_reduction
         assert(self.query_reduction == "sum" or self.query_reduction == "mean")
+        self.add_pe = add_pe
+        self.device = device
 
     def forward(self, states):
         batch_size, num_steps, n_agents, obs_dim = states.shape
         assert n_agents == self.n_agents
         state_embeddings = self.embedding_net(states)  # (batch, num_steps, n_agents, emd)
         emb = state_embeddings.shape[-1]
+        if self.add_pe:
+            assert self.device is not None
+            positional_embeddings = positionalencoding1d(emb, n_agents)
+            positional_embeddings = positional_embeddings.to(self.device)
+            state_embeddings += positional_embeddings
+            
         assert emb % self.num_heads == 0
 
         if self.query_reduction == "sum":
