@@ -215,7 +215,7 @@ class TransformerRewardPredictor_v3(nn.Module):
             init_(nn.Linear(1024, 64)),
         )
         self.value_linear_norm = nn.LayerNorm(64)
-        self.time_transformer = TransformerRewardPredictor_v2(64, num_heads, query_reduction=query_reduction, add_pe=False, device=device)
+        self.time_transformer = TransformerRewardPredictor_v2(64, num_heads, query_reduction=query_reduction, add_pe=add_pe, device=device)
         self.d_k = 64//self.num_heads
         self.query_reduction = query_reduction
         assert(self.query_reduction == "sum" or self.query_reduction == "mean")
@@ -282,7 +282,7 @@ class TransformerRewardPredictor_v4(nn.Module):
             init_(nn.Linear(1024, 64)),
         )
         self.value_linear_norm = nn.LayerNorm(64)
-        self.time_transformer = TransformerRewardPredictor_v2(64, num_heads, query_reduction=query_reduction, add_pe=False, device=device)
+        self.time_transformer = TransformerRewardPredictor_v2(64, num_heads, query_reduction=query_reduction, add_pe=add_pe, device=device)
         self.d_k = 64//self.num_heads
         self.query_reduction = query_reduction
         assert(self.query_reduction == "sum" or self.query_reduction == "mean")
