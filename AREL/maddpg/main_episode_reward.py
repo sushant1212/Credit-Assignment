@@ -107,6 +107,7 @@ parser.add_argument("--use_variance_loss", default=False, action="store_true")
 parser.add_argument("--query_reduction", default="sum", type=str, required=False)
 parser.add_argument("--add_pe", default=False, type=bool, required=False)
 parser.add_argument("--disable_comet", default=False, action="store_true")
+parser.add_argument("--distribute_agent_wise", default=False, action="store_true")
 args = parser.parse_args()
 if args.exp_name is None:
     args.exp_name = args.scenario + '_' + args.critic_type + '_' + args.target_update_mode + '_hiddensize' \
@@ -226,12 +227,17 @@ def sample_and_pred(memory, model, batch_size, n_agents, n_trajectories=128):
         rewards = np.repeat(rewards[:, :, np.newaxis], n_agents, axis=2)
 
     elif args.scenario == "simple_spread_n6_custom":
-        rewards = np.sum(np.squeeze(rewards, axis=3), axis=2)
-        rewards = np.repeat(rewards[:, np.newaxis, :], args.num_steps, axis=1)
         mask = np.zeros((n_trajectories, args.num_steps))
         mask[:, -1] = 1
         mask = np.repeat(mask[:, :, np.newaxis], n_agents, axis=-1)
-        rewards *= mask
+        if args.distribute_agent_wise:
+            rewards = np.sum(np.squeeze(rewards, axis=3), axis=2)
+            rewards = np.repeat(rewards[:, np.newaxis, :], args.num_steps, axis=1)
+            rewards *= mask
+        else:
+            rewards = rewards.reshape(n_trajectories, -1)
+            rewards = np.sum(rewards, axis=-1)
+            rewards = rewards.reshape(-1, 1, 1) * mask
 
     else: raise AssertionError
 

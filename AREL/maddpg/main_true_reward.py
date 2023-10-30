@@ -107,6 +107,7 @@ parser.add_argument("--use_variance_loss", default=False, action="store_true")
 parser.add_argument("--query_reduction", default="sum", type=str, required=False)
 parser.add_argument("--add_pe", default=False, type=bool, required=False)
 parser.add_argument("--disable_comet", default=False, action="store_true")
+parser.add_argument("--distribute_agent_wise", default=False, action="store_true")
 args = parser.parse_args()
 if args.exp_name is None:
     args.exp_name = args.scenario + '_' + args.critic_type + '_' + args.target_update_mode + '_hiddensize' \
@@ -212,6 +213,12 @@ def sample_trajectory(memory, n_trajectories=128):
 def sample_and_pred(memory, model, batch_size, n_agents, n_trajectories=128):
     sample_traj = random.sample(memory, n_trajectories)
     samples = Transition_e(*zip(*sample_traj))
+    rewards = np.array(samples.rewards)
+
+    if not args.distribute_agent_wise:
+        rewards = rewards.reshape(n_trajectories, args.num_steps, n_agents, -1)
+        rewards = np.sum(np.squeeze(rewards, axis=-1), axis=-1)
+        rewards = np.repeat(rewards[:, :, np.newaxis], n_agents, axis=-1)
 
     # next_states = np.array(list(samples.next_states)).reshape(n_trajectories, args.num_steps, n_agents, -1).transpose((0,2,1,3))
     # x_train_tensor = torch.from_numpy(next_states).float().contiguous()
@@ -226,7 +233,7 @@ def sample_and_pred(memory, model, batch_size, n_agents, n_trajectories=128):
     masks = np.array(samples.masks)[ind1[:,None], ind2].reshape(batch_size,-1)
     next_states = np.array(samples.next_states)[ind1[:,None], ind2].reshape(batch_size,-1)
     # rewards = pred_rewards[ind1[:,None], ind2].reshape(batch_size,-1)
-    rewards = np.array(samples.rewards)[ind1[:,None], ind2].reshape(batch_size,-1)
+    rewards = rewards[ind1[:,None], ind2].reshape(batch_size,-1)
 
     return Transition(states, actions, masks, next_states, rewards)
 
