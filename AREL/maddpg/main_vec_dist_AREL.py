@@ -41,9 +41,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from torch.utils.tensorboard import SummaryWriter
-
-
-
+from comet_ml import Experiment
 
 
 parser = argparse.ArgumentParser(description='PyTorch REINFORCE example')
@@ -104,6 +102,12 @@ parser.add_argument('--target_update_mode', default='soft', help='soft | hard | 
 parser.add_argument('--cuda', default=False, action='store_true')
 parser.add_argument("--gpu_id", default="0", type=str, required=False)
 parser.add_argument('--eval_freq', type=int, default=1000)
+parser.add_argument("--use_true_reward", default=False, action="store_true")
+parser.add_argument("--use_variance_loss", default=False, action="store_true")
+parser.add_argument("--query_reduction", default="sum", type=str, required=False)
+parser.add_argument("--add_pe", default=False, type=bool, required=False)
+parser.add_argument("--disable_comet", default=False, action="store_true")
+parser.add_argument("--distribute_agent_wise", default=False, action="store_true")
 args = parser.parse_args()
 if args.exp_name is None:
     args.exp_name = args.scenario + '_' + args.critic_type + '_' + args.target_update_mode + '_hiddensize' \
@@ -277,7 +281,14 @@ train_step = make_train_step(reward_model, loss_fn, opt)
 from torch.utils.tensorboard import SummaryWriter
 
 # default `log_dir` is "runs" - we'll be more specific here
-writer = SummaryWriter(tensorboard_path)
+# writer = SummaryWriter(tensorboard_path)
+if not args.disable_comet:
+    experiment = Experiment(
+        api_key="8U8V63x4zSaEk4vDrtwppe8Vg",
+        project_name="marl-credit-assignment",
+        parse_args=False
+    )
+    experiment.set_name(args.exp_name)
 ####################################################
 
 for i_episode in range(args.num_episodes):
@@ -286,6 +297,10 @@ for i_episode in range(args.num_episodes):
     episode_step = 0
     agents_rew = [[] for _ in range(n_agents)]
     x_e, action_e, mask_e, x_next_e, reward_e = [], [], [], [], []
+    policy_losses = []
+    policy_grad_norms = []
+    value_losses = []
+    value_grad_norms = []
     while True:
         # action_n_1 = [agent.select_action(torch.Tensor([obs]).to(device), action_noise=True, param_noise=False).squeeze().cpu().numpy() for obs in obs_n]
         action_n = agent.select_action(torch.Tensor(obs_n).to(device), action_noise=True,
@@ -321,22 +336,26 @@ for i_episode in range(args.num_episodes):
                     batch = sample_and_pred(memory_e.memory, reward_model, 
                                     args.batch_size, n_agents, n_trajectories=256)
                     
-                    policy_loss = agent.update_actor_parameters(batch, i, args.shuffle)
+                    policy_loss, policy_grad_norm = agent.update_actor_parameters(batch, i, args.shuffle)
+                    policy_losses.append(policy_loss)
+                    policy_grad_norms.append(policy_grad_norm.item())
                     updates += 1
                 print('episode {}, p loss {}, p_lr {}'.
                       format(i_episode, policy_loss, agent.actor_lr))
             if total_numsteps % args.steps_per_critic_update == 0:
-                value_losses = []
+                temp_value_losses = []
                 for _ in range(args.critic_updates_per_step):
                     
                     batch = sample_and_pred(memory_e.memory, reward_model, 
                                     args.batch_size, n_agents, n_trajectories=256)
-                    
-                    value_losses.append(agent.update_critic_parameters(batch, i, args.shuffle)[0])
+                    value_loss, _, value_grad_norm = agent.update_critic_parameters(batch, i, args.shuffle)
+                    value_losses.append(value_loss)
+                    value_grad_norms.append(value_grad_norm.item())
+                    temp_value_losses.append(value_loss)
                     updates += 1
-                value_loss = np.mean(value_losses)
+                v_loss = np.mean(temp_value_losses)
                 print('episode {}, q loss {},  q_lr {}'.
-                      format(i_episode, value_loss, agent.critic_optim.param_groups[0]['lr']))
+                      format(i_episode, v_loss, agent.critic_optim.param_groups[0]['lr']))
                 if args.target_update_mode == 'episodic':
                     hard_update(agent.critic_target, agent.critic)
 
@@ -364,13 +383,31 @@ for i_episode in range(args.num_episodes):
             epoch_train_step_reward_loss.append(loss_2)
             epoch_train_reg_loss.append(loss_3)
         torch.save(reward_model.state_dict(), os.path.join(os.path.join(exp_save_dir, f'reward_model_{i_episode+1}.pth')))
-        writer.add_scalar(args.exp_name + f'_episode_reward_loss', np.mean(epoch_train_episode_reward_loss), i_episode)
-        writer.add_scalar(args.exp_name + f'_step_reward_loss', np.mean(epoch_train_step_reward_loss), i_episode)
-        writer.add_scalar(args.exp_name + f'_reg_loss', np.mean(epoch_train_reg_loss), i_episode)
+        if not args.disable_comet:
+            experiment.log_metric("episode_reward_loss", np.mean(epoch_train_episode_reward_loss), step=i_episode)
+            experiment.log_metric("step_reward_loss", np.mean(epoch_train_step_reward_loss), i_episode)
+            experiment.log_metric("reg_loss", np.mean(epoch_train_reg_loss), step=i_episode)
+            # writer.add_scalar(args.exp_name + f'_episode_reward_loss', np.mean(epoch_train_episode_reward_loss), i_episode)
+            # writer.add_scalar(args.exp_name + f'_step_reward_loss', np.mean(epoch_train_step_reward_loss), i_episode)
+            # writer.add_scalar(args.exp_name + f'_reg_loss', np.mean(epoch_train_reg_loss), i_episode)
 
     if not args.fixed_lr:
         agent.adjust_lr(i_episode)
-    writer.add_scalar(args.exp_name + f'_episode_reward', episode_reward, i_episode)
+    # writer.add_scalar(args.exp_name + f'_episode_reward', episode_reward, i_episode)
+    if not args.disable_comet:
+        experiment.log_metric("episode_reward", episode_reward, step=i_episode)
+    if len(policy_losses) != 0 and not args.disable_comet:
+        # writer.add_scalar(args.exp_name + f"policy_loss", np.mean(policy_losses), i_episode)
+        experiment.log_metric("policy_loss", np.mean(policy_losses), step=i_episode)
+    if len(policy_grad_norms) != 0 and not args.disable_comet:
+        # writer.add_scalar(args.exp_name + f"policy_grad_norm", np.mean(policy_grad_norms), i_episode)
+        experiment.log_metric("policy_grad_norm", np.mean(policy_grad_norms), step=i_episode)
+    if len(value_losses) != 0 and not args.disable_comet:
+        # writer.add_scalar(args.exp_name + f"value_loss", np.mean(value_losses), i_episode)
+        experiment.log_metric("value_loss", np.mean(value_losses), step=i_episode)
+    if len(value_grad_norms) != 0 and not args.disable_comet:
+        # writer.add_scalar(args.exp_name + f"value_grad_norm", np.mean(value_grad_norms), i_episode)
+        experiment.log_metric("value_grad_norm", np.mean(value_grad_norms), step=i_episode)
     rewards.append(episode_reward)
     if (i_episode + 1) % args.eval_freq == 0:
         tr_log = {'num_adversary': 0,
@@ -381,8 +418,7 @@ for i_episode in range(args.num_episodes):
                   'i_episode': i_episode, 'start_time': start_time}
         copy_actor_policy(agent, eval_agent)
         test_q.put([eval_agent, tr_log])
-        
-np.save(os.path.join(exp_save_dir, "reward_cuve"), np.array(rewards), allow_pickle=True, fix_imports=True)
+np.save(os.path.join(exp_save_dir, "reward_curve"), np.array(rewards), allow_pickle=True, fix_imports=True)
 env.close()
 time.sleep(5)
 done_training.value = True
