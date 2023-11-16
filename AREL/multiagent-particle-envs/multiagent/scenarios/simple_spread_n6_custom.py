@@ -5,7 +5,7 @@ from multiagent.scenario import BaseScenario
 
 
 class Scenario(BaseScenario):
-    def make_world(self, sort_obs=True):
+    def make_world(self, sort_obs=False):
         world = World()
         self.np_rnd = np.random.RandomState(0)
         self.sort_obs = sort_obs
@@ -108,12 +108,15 @@ class Scenario(BaseScenario):
             entity_color.append(entity.color)
         # communication of all other agents
         other_pos = []
-        for other in world.agents:
-            if other is agent: continue
+        landmark_pos = []
+        for i, other in enumerate(world.agents):
+            if other is agent: 
+                agent_index = i
+                continue
             other_pos.append(other.state.p_pos - agent.state.p_pos)
-        if self.sort_obs:
-            other_pos = sorted(other_pos, key=lambda k: [k[0], k[1]])
-        obs = np.concatenate([agent.state.p_vel] + [agent.state.p_pos] + entity_pos + other_pos)
+            landmark_pos.append(entity_pos[i])
+
+        obs = np.concatenate([agent.state.p_vel] + [agent.state.p_pos] + [entity_pos[agent_index]] + landmark_pos + other_pos)
         return obs
 
     def seed(self, seed=None):
