@@ -211,14 +211,19 @@ def sample_trajectory(memory, n_trajectories=128):
     return x_train_tensor, y_train_tensor, episode_time_reward_tensor
 
 def sample_and_pred(memory, model, batch_size, n_agents, n_trajectories=128):
+    """
+    NOTE: Rewards are being normalized!
+    """
     sample_traj = random.sample(memory, n_trajectories)
     samples = Transition_e(*zip(*sample_traj))
     rewards = np.array(samples.rewards)
+    rewards /= (3 * np.sqrt(2))  # 3 being the side of the room
 
     if not args.distribute_agent_wise:
         rewards = rewards.reshape(n_trajectories, args.num_steps, n_agents, -1)
         rewards = np.sum(np.squeeze(rewards, axis=-1), axis=-1)
         rewards = np.repeat(rewards[:, :, np.newaxis], n_agents, axis=-1)
+        rewards /= n_agents  # normalizing with the number of agents
 
     # next_states = np.array(list(samples.next_states)).reshape(n_trajectories, args.num_steps, n_agents, -1).transpose((0,2,1,3))
     # x_train_tensor = torch.from_numpy(next_states).float().contiguous()

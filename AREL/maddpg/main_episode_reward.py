@@ -210,6 +210,9 @@ def sample_trajectory(memory, n_trajectories=128):
     return x_train_tensor, y_train_tensor, episode_time_reward_tensor
 
 def sample_and_pred(memory, model, batch_size, n_agents, n_trajectories=128):
+    """
+    NOTE: Rewards are being normalized!
+    """
     sample_traj = random.sample(memory, n_trajectories)
     samples = Transition_e(*zip(*sample_traj))
 
@@ -218,6 +221,7 @@ def sample_and_pred(memory, model, batch_size, n_agents, n_trajectories=128):
     # _, y_time_hat = model(x_train_tensor.to(device))
     # pred_rewards = np.repeat(y_time_hat.detach().cpu().numpy()[:,:,np.newaxis], n_agents, axis=2)
     rewards = np.array(list(samples.rewards)).reshape(n_trajectories, args.num_steps, n_agents, -1).transpose((0,2,1,3))
+    rewards /= (3 * np.sqrt(2))  # room size being 3
     if args.scenario == "simple_spread_n6":
         rewards = np.sum(np.squeeze(rewards[:,0,:,:],axis=2), axis=1).reshape(n_trajectories, 1)
         rewards = np.repeat(rewards, args.num_steps, axis=1)
@@ -233,10 +237,12 @@ def sample_and_pred(memory, model, batch_size, n_agents, n_trajectories=128):
         if args.distribute_agent_wise:
             rewards = np.sum(np.squeeze(rewards, axis=3), axis=2)
             rewards = np.repeat(rewards[:, np.newaxis, :], args.num_steps, axis=1)
+            rewards /= args.num_steps
             rewards *= mask
         else:
             rewards = rewards.reshape(n_trajectories, -1)
             rewards = np.sum(rewards, axis=-1)
+            rewards /= (args.num_steps * n_agents)
             rewards = rewards.reshape(-1, 1, 1) * mask
 
     else: raise AssertionError
