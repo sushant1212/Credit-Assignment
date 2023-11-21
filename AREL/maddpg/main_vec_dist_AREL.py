@@ -202,8 +202,10 @@ def sample_trajectory(memory, n_trajectories=128):
     next_states = np.array(list(samples.next_states)).reshape(n_trajectories, args.num_steps, n_agents, -1).transpose((0,2,1,3))
     rewards = np.array(list(samples.rewards)).reshape(n_trajectories, args.num_steps, n_agents, -1).transpose((0,2,1,3))
 
-    episode_reward = np.sum(np.squeeze(rewards[:,0,:,:],axis=2), axis=1)
-    episode_time_reward = np.squeeze(rewards[:,0,:,:],axis=2)
+    # episode_reward = np.sum(np.squeeze(rewards[:,0,:,:],axis=2), axis=1)
+    # episode_time_reward = np.squeeze(rewards[:,0,:,:],axis=2)
+    episode_reward = np.sum(np.sum(np.squeeze(rewards, axis=-1), axis=-1), axis=-1)
+    episode_time_reward = np.sum(np.squeeze(rewards, axis=-1), axis=1)
     x_train_tensor = torch.from_numpy(next_states).float().contiguous()
     y_train_tensor = torch.from_numpy(episode_reward).float().contiguous()
     episode_time_reward_tensor = torch.from_numpy(episode_time_reward).float().contiguous()
