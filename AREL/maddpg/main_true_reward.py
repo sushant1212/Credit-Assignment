@@ -345,7 +345,7 @@ for i_episode in range(args.num_episodes):
                 for _ in range(args.updates_per_step):
                     
                     batch = sample_and_pred(memory_e.memory, None, 
-                                    args.batch_size, n_agents, n_trajectories=4)
+                                    args.batch_size, n_agents, n_trajectories=256)
                     
                     policy_loss, policy_grad_norm = agent.update_actor_parameters(batch, i, args.shuffle)
                     policy_losses.append(policy_loss)
@@ -358,7 +358,7 @@ for i_episode in range(args.num_episodes):
                 for _ in range(args.critic_updates_per_step):
                     
                     batch = sample_and_pred(memory_e.memory, None, 
-                                    args.batch_size, n_agents, n_trajectories=4)
+                                    args.batch_size, n_agents, n_trajectories=256)
                     value_loss, _, value_grad_norm = agent.update_critic_parameters(batch, i, args.shuffle)
 
                     value_losses.append(value_loss)
