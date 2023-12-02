@@ -99,7 +99,7 @@ class ActorG(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, hidden_size, num_inputs, num_outputs, num_agents, critic_type='mlp', agent_id=0, group=None):
+    def __init__(self, hidden_size, num_inputs, num_outputs, num_agents, critic_type='mlp', agent_id=0, group=None, agent_wise=False):
         super(Critic, self).__init__()
 
         self.num_agents = num_agents
@@ -111,20 +111,29 @@ class Critic(nn.Module):
             self.net = self.net_fn(sa_dim, num_agents, hidden_size)
         else:
             self.net = self.net_fn(sa_dim, num_agents, hidden_size, group)
+        self.agent_wise = agent_wise
 
     def forward(self, inputs, actions):
         bz = inputs.size()[0]  # bz = batch
         s_n = inputs.view(bz, self.num_agents, -1)  # s_n.shape = (batch, n_agents, 26)
         a_n = actions.view(bz, self.num_agents, -1)  # a_n.shape = (batch, n_agents, n_action)
-        x = torch.cat((s_n, a_n), dim=2)  # x forms state-action tensor
-        V = self.net(x)  # V.shape = (batch, 1)
+        x = torch.cat((s_n, a_n), dim=2)  # x forms state-action tensor = (batch, n_agents, _)
+        if not self.agent_wise:
+            V = self.net(x)  # V.shape = (batch, 1)
+        else:
+            V = None
+            for _ in range(self.num_agents):
+                v = self.net(x)
+                if V is None: V = v
+                else: V = torch.cat((V, v), dim=1)
+                x = torch.roll(x, -1, dims=1)
         return V
 
 
 class DDPG(object):
     def __init__(self, gamma, tau, hidden_size, obs_dim, n_action, n_agent, obs_dims, agent_id, actor_lr, critic_lr,
                  fixed_lr, critic_type, actor_type, train_noise, num_episodes, num_steps,
-                 critic_dec_cen, target_update_mode='soft', device='cpu'):
+                 critic_dec_cen, target_update_mode='soft', device='cpu', agent_wise=False):
         self.device = device
         self.obs_dim = obs_dim
         self.n_agent = n_agent
@@ -149,9 +158,9 @@ class DDPG(object):
             self.critic_target = Critic(hidden_size, obs_dims[agent_id + 1], n_action, 1, critic_type, agent_id).to(self.device)
         else:
             self.critic = Critic(hidden_size, np.sum(obs_dims),
-                                 n_action * n_agent, n_agent, critic_type, agent_id).to(self.device)
+                                 n_action * n_agent, n_agent, critic_type, agent_id, agent_wise=agent_wise).to(self.device)
             self.critic_target = Critic(hidden_size, np.sum(
-                obs_dims), n_action * n_agent, n_agent, critic_type, agent_id).to(self.device)
+                obs_dims), n_action * n_agent, n_agent, critic_type, agent_id, agent_wise=agent_wise).to(self.device)
         critic_n_params = sum(p.numel() for p in self.critic.parameters())
         print('# of critic params', critic_n_params)
         self.critic_optim = Adam(self.critic.parameters(), lr=critic_lr)

@@ -152,12 +152,12 @@ else:
                  env.observation_space[0].shape[0], n_actions[0], n_agents, obs_dims, 0,
                  args.actor_lr, args.critic_lr,
                  args.fixed_lr, args.critic_type, args.actor_type, args.train_noise, args.num_episodes,
-                 args.num_steps, args.critic_dec_cen, args.target_update_mode, device)
+                 args.num_steps, args.critic_dec_cen, args.target_update_mode, device, agent_wise=args.distribute_agent_wise)
     eval_agent = DDPG(args.gamma, args.tau, args.hidden_size,
                  env.observation_space[0].shape[0], n_actions[0], n_agents, obs_dims, 0,
                  args.actor_lr, args.critic_lr,
                  args.fixed_lr, args.critic_type, args.actor_type, args.train_noise, args.num_episodes,
-                 args.num_steps, args.critic_dec_cen, args.target_update_mode, 'cpu')
+                 args.num_steps, args.critic_dec_cen, args.target_update_mode, 'cpu', agent_wise=args.distribute_agent_wise)
 memory = ReplayMemory(args.replay_size)
 memory_e = ReplayMemory_episode(int(args.replay_size/args.num_steps))
 feat_dims = []
@@ -217,13 +217,13 @@ def sample_and_pred(memory, model, batch_size, n_agents, n_trajectories=128):
     sample_traj = random.sample(memory, n_trajectories)
     samples = Transition_e(*zip(*sample_traj))
     rewards = np.array(samples.rewards)
-    rewards /= (3 * np.sqrt(2))  # 3 being the side of the room
+    # rewards /= (3 * np.sqrt(2))  # 3 being the side of the room
 
     if not args.distribute_agent_wise:
         rewards = rewards.reshape(n_trajectories, args.num_steps, n_agents, -1)
         rewards = np.sum(np.squeeze(rewards, axis=-1), axis=-1)
         rewards = np.repeat(rewards[:, :, np.newaxis], n_agents, axis=-1)
-        rewards /= n_agents  # normalizing with the number of agents
+        # rewards /= n_agents  # normalizing with the number of agents
 
     # next_states = np.array(list(samples.next_states)).reshape(n_trajectories, args.num_steps, n_agents, -1).transpose((0,2,1,3))
     # x_train_tensor = torch.from_numpy(next_states).float().contiguous()
@@ -345,7 +345,7 @@ for i_episode in range(args.num_episodes):
                 for _ in range(args.updates_per_step):
                     
                     batch = sample_and_pred(memory_e.memory, None, 
-                                    args.batch_size, n_agents, n_trajectories=256)
+                                    args.batch_size, n_agents, n_trajectories=4)
                     
                     policy_loss, policy_grad_norm = agent.update_actor_parameters(batch, i, args.shuffle)
                     policy_losses.append(policy_loss)
@@ -358,8 +358,9 @@ for i_episode in range(args.num_episodes):
                 for _ in range(args.critic_updates_per_step):
                     
                     batch = sample_and_pred(memory_e.memory, None, 
-                                    args.batch_size, n_agents, n_trajectories=256)
+                                    args.batch_size, n_agents, n_trajectories=4)
                     value_loss, _, value_grad_norm = agent.update_critic_parameters(batch, i, args.shuffle)
+
                     value_losses.append(value_loss)
                     value_grad_norms.append(value_grad_norm.item())
                     temp_value_losses.append(value_loss)
